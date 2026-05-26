@@ -50,7 +50,8 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 mail = Mail(app)
 
 db.init_app(app)
-
+with app.app_context():
+    db.create_all()
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 def make_slug(name, user_id):
