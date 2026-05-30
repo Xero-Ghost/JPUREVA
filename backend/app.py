@@ -1127,15 +1127,19 @@ import urllib.request as urllib_request_mod
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
-GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'https://jpureva-f5j6.onrender.com/api/auth/google/callback')
 
 @app.route('/api/auth/google', methods=['GET'])
 def google_login():
     if not GOOGLE_CLIENT_ID:
         return jsonify({'status': 'error', 'message': 'Google OAuth not configured. Please set GOOGLE_CLIENT_ID in .env'}), 500
+    
+    # Dynamically determine the redirect URI so you don't need to configure it!
+    scheme = 'http' if 'localhost' in request.host or '127.0.0.1' in request.host else 'https'
+    dynamic_redirect_uri = os.getenv('GOOGLE_REDIRECT_URI') or f"{scheme}://{request.host}/api/auth/google/callback"
+
     params = {
         'client_id': GOOGLE_CLIENT_ID,
-        'redirect_uri': GOOGLE_REDIRECT_URI,
+        'redirect_uri': dynamic_redirect_uri,
         'response_type': 'code',
         'scope': 'openid email profile',
         'access_type': 'offline',
@@ -1153,11 +1157,14 @@ def google_callback():
     if not code:
         return jsonify({'status': 'error', 'message': 'No code provided by Google'}), 400
 
+    scheme = 'http' if 'localhost' in request.host or '127.0.0.1' in request.host else 'https'
+    dynamic_redirect_uri = os.getenv('GOOGLE_REDIRECT_URI') or f"{scheme}://{request.host}/api/auth/google/callback"
+
     token_data = urllib.parse.urlencode({
         'code': code,
         'client_id': GOOGLE_CLIENT_ID,
         'client_secret': GOOGLE_CLIENT_SECRET,
-        'redirect_uri': GOOGLE_REDIRECT_URI,
+        'redirect_uri': dynamic_redirect_uri,
         'grant_type': 'authorization_code'
     }).encode()
     token_req = urllib_request_mod.Request('https://oauth2.googleapis.com/token', data=token_data, method='POST')
