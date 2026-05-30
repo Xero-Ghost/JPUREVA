@@ -13,6 +13,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import PartnerDashboard from './pages/PartnerDashboard';
 import ConsumerDashboard from './pages/ConsumerDashboard';
 import PartnerProfile from './pages/PartnerProfile';
+import Settings from './pages/Settings';
 import { AuthProvider } from './context/AuthContext';
 import GoogleAuthSuccess from './pages/GoogleAuthSuccess';
 
@@ -36,6 +37,7 @@ function App() {
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/partner/dashboard" element={<PartnerDashboard />} />
               <Route path="/consumer/dashboard" element={<ConsumerDashboard />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="/:partnerSlug" element={<PartnerProfile />} />
             </Routes>
           </main>

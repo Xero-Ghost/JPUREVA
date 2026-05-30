@@ -11,8 +11,9 @@ export default function GoogleAuthSuccess() {
     const token = params.get('token');
     const role = params.get('role');
     const username = params.get('username');
+    const id = params.get('id') ? Number(params.get('id')) : null;
     if (token && role && username) {
-      login({ role, username }, token);
+      login({ id, role, username }, token);
       if (role === 'admin') navigate('/admin');
       else if (role === 'partner') navigate('/partner/dashboard');
       else navigate('/consumer/dashboard');

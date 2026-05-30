@@ -1,5 +1,11 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from werkzeug.security import generate_password_hash
+
+# Hardcoded admin credentials - only one admin allowed
+ADMIN_USERNAME = 'admin'
+ADMIN_PASSWORD_HASH = generate_password_hash('JPureva@Admin2026')
+ADMIN_EMAIL = 'admin@jpureva.com'
 
 db = SQLAlchemy()
 
@@ -7,14 +13,16 @@ class User(db.Model):
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(100), unique=True, nullable=False)
+    username = db.Column(db.String(100), unique=False, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), nullable=False) # admin, partner, consumer
     email = db.Column(db.String(120), unique=True, nullable=True)
     email_verified = db.Column(db.Boolean, default=False, nullable=False)
     email_verification_token = db.Column(db.String(120), nullable=True)
+    email_verification_sent_at = db.Column(db.DateTime, nullable=True)
     password_reset_token = db.Column(db.String(120), nullable=True)
     password_reset_sent_at = db.Column(db.DateTime, nullable=True)
+    profile_image_url = db.Column(db.String(500), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -135,3 +143,35 @@ class Notification(db.Model):
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class Testimonial(db.Model):
+    __tablename__ = 'testimonials'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    role = db.Column(db.String(50), nullable=False)  # Consumer, Partner, Critic
+    content = db.Column(db.Text, nullable=False)
+    avatar_url = db.Column(db.String(500))
+    is_featured = db.Column(db.Boolean, default=False)  # For landing page
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class TrustStoryBlock(db.Model):
+    __tablename__ = 'trust_story_blocks'
+    id = db.Column(db.Integer, primary_key=True)
+    block_type = db.Column(db.String(20), nullable=False)  # testimonial, image, video, text, document
+    position = db.Column(db.Integer, nullable=False, default=0)
+    config = db.Column(db.Text, nullable=False)  # JSON: depends on block_type
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+def ensure_admin_exists():
+    """Create the sole admin user if it doesn't exist."""
+    from flask import current_app
+    admin = User.query.filter_by(role='admin').first()
+    if not admin:
+        admin = User(
+            username=ADMIN_USERNAME,
+            password_hash=ADMIN_PASSWORD_HASH,
+            email=ADMIN_EMAIL,
+            role='admin',
+            email_verified=True
+        )
+        db.session.add(admin)
+        db.session.commit()

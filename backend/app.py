@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_mail import Mail, Message
-from models import db, Restaurant, Review, Audit, Rating, ConnectionRequest, User, Lab, HomeConfig, OnboardingRequest, Notification
+from models import db, Restaurant, Review, Audit, Rating, ConnectionRequest, User, Lab, HomeConfig, OnboardingRequest, Notification, Testimonial, TrustStoryBlock, ensure_admin_exists
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
@@ -9,25 +9,55 @@ from sqlalchemy import text
 import json
 import re
 from uuid import uuid4
+from functools import wraps
+from urllib.parse import urlparse
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 load_dotenv()
 
+def _normalize_origin(value):
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if "://" in value:
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return value.rstrip("/")
+
+def _parse_origins(value):
+    origins = []
+    if not value:
+        return origins
+    for raw in value.split(","):
+        normalized = _normalize_origin(raw)
+        if normalized:
+            origins.append(normalized)
+    return origins
+
 app = Flask(__name__)
+frontend_env_origins = _parse_origins(os.getenv("FRONTEND_URL"))
+allowed_origins = frontend_env_origins or [
+    "https://jpureva.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
 CORS(app, 
-     origins=["https://jpureva.vercel.app", "http://localhost:5173", "http://localhost:3000"],
+     origins=allowed_origins,
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 )
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-this-secret')
-app.config['MAIL_SERVER'] = os.getenv('SMTP_HOST', os.getenv('EMAIL_HOST', 'smtp.gmail.com'))
-app.config['MAIL_PORT'] = int(os.getenv('SMTP_PORT', os.getenv('EMAIL_PORT', '587')))
+app.config['MAIL_SERVER'] = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = os.getenv('EMAIL_PORT', '587')
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER', os.getenv('SMTP_USER', 'jpureva@gmail.com'))
-app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASSWORD', os.getenv('SMTP_PASS'))
+app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER', 'jpureva@gmail.com')
+app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
 app.config['FRONTEND_URL'] = os.getenv('FRONTEND_URL', '')
 app.config['BACKEND_URL'] = os.getenv('BACKEND_URL', '')
@@ -57,6 +87,39 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# --- Auth Middleware ---
+def _get_user_from_token(token_str):
+    """Resolve a user from either a fake-jwt or real PyJWT token."""
+    if not token_str:
+        return None
+    # Check fake token format: fake-jwt-token-<user_id>
+    if token_str.startswith('fake-jwt-token-'):
+        try:
+            user_id = int(token_str.replace('fake-jwt-token-', ''))
+            return User.query.get(user_id)
+        except Exception:
+            pass
+    # Check real PyJWT
+    try:
+        import jwt as pyjwt
+        payload = pyjwt.decode(token_str, app.config['SECRET_KEY'], algorithms=['HS256'])
+        return User.query.get(payload.get('user_id'))
+    except Exception:
+        pass
+    return None
+
+def require_admin(f):
+    """Decorator that enforces admin authentication on a route."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        token_str = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else ''
+        user = _get_user_from_token(token_str)
+        if not user or user.role != 'admin':
+            return jsonify({'error': 'Admin access required'}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 def make_slug(name, user_id):
     base = re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')
@@ -113,12 +176,18 @@ with app.app_context():
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(120) UNIQUE"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(120)"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TIMESTAMP"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url VARCHAR(500)"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(120)"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_sent_at TIMESTAMP"))
+            # Drop username unique constraint
+            conn.execute(text("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_username_key"))
             conn.commit()
-            print('[OK] Ensured user columns exist')
+            print('[OK] Ensured user columns exist and username constraint dropped')
     except Exception as ex:
         print('[WARN] Could not ensure schema changes:', ex)
+    # Ensure the hardcoded admin user exists
+    ensure_admin_exists()
 
 @app.route('/api/restaurants', methods=['GET'])
 def get_restaurants():
@@ -326,24 +395,39 @@ def register():
     email = data.get('email')
     role = data.get('role', 'consumer')
 
+    if role == 'admin':
+        return jsonify({'error': 'Admin account cannot be created via registration'}), 403
+
     if not username or not password or not email:
         return jsonify({'status': 'error', 'message': 'username, email and password are required'}), 400
     if len(password) < 8:
         return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters'}), 400
     if confirm is not None and password != confirm:
         return jsonify({'status': 'error', 'message': 'Passwords do not match'}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({'status': 'error', 'message': 'Username already exists'}), 400
-    if User.query.filter_by(email=email).first():
-        return jsonify({'status': 'error', 'message': 'Email already registered'}), 400
 
+    user = User.query.filter_by(email=email).first()
     verification_token = uuid4().hex
-    user = User(username=username, password_hash=generate_password_hash(password), role=role, email=email, email_verified=False, email_verification_token=verification_token)
-    db.session.add(user)
-    db.session.commit()
+
+    if user:
+        if user.email_verified:
+            return jsonify({'status': 'error', 'message': 'Email already registered'}), 400
+        else:
+            # Overwrite unverified account so the email isn't permanently locked
+            user.username = username
+            user.password_hash = generate_password_hash(password)
+            user.role = role
+            user.email_verification_token = verification_token
+            user.email_verification_sent_at = datetime.utcnow()
+            db.session.commit()
+    else:
+        user = User(username=username, password_hash=generate_password_hash(password), role=role, email=email, email_verified=False, email_verification_token=verification_token, email_verification_sent_at=datetime.utcnow())
+        db.session.add(user)
+        db.session.commit()
 
     frontend_url = app.config['FRONTEND_URL'] or request.host_url.rstrip('/')
     verification_url = f"{frontend_url.rstrip('/')}/verify-email?token={verification_token}"
+    print(f"\n[DEBUG] Verification Link for {email}: {verification_url}\n")
+    
     sent = False
     try:
         sent = send_email(
@@ -355,17 +439,17 @@ def register():
         print('send_email error:', e)
 
     if not sent:
-        return jsonify({'status': 'success', 'message': 'User registered. Verification email could not be sent because email SMTP is not configured. Please set EMAIL_PASSWORD or SMTP_PASS to enable email delivery.', 'user_id': user.id}), 201
+        return jsonify({'status': 'success', 'message': 'User registered. Verification email could not be sent (SMTP timeout). Check your backend terminal for the verification link.', 'user_id': user.id}), 201
 
     return jsonify({'status': 'success', 'message': 'User registered. A verification email has been sent from jpureva@gmail.com.', 'user_id': user.id, 'role': user.role}), 201
 
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
-    username = data.get('username')
+    email = data.get('email')
     password = data.get('password')
     
-    user = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(email=email).first()
     if user and check_password_hash(user.password_hash, password):
         if not user.email_verified:
             return jsonify({'status': 'error', 'message': 'Please verify your email before logging in.'}), 403
@@ -381,11 +465,50 @@ def login():
 def verify_email(token):
     user = User.query.filter_by(email_verification_token=token).first()
     if not user:
-        return jsonify({'status': 'error', 'message': 'Invalid or expired verification link'}), 404
+        return jsonify({'status': 'error', 'message': 'Invalid or already used verification link'}), 404
+    
+    if user.email_verification_sent_at:
+        expiration_time = user.email_verification_sent_at + timedelta(minutes=10)
+        if datetime.utcnow() > expiration_time:
+            return jsonify({'status': 'error', 'message': 'Verification link has expired. Please register again to get a new link.'}), 400
+
     user.email_verified = True
     user.email_verification_token = None
     db.session.commit()
     return jsonify({'status': 'success', 'message': 'Email verified successfully. You can now log in.'}), 200
+
+@app.route('/api/user/settings', methods=['PUT'])
+def update_user_settings():
+    auth_header = request.headers.get('Authorization', '')
+    token_str = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else ''
+    user = _get_user_from_token(token_str)
+    
+    if not user:
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+    
+    data = request.json
+    if 'username' in data and data['username']:
+        user.username = data['username']
+    if 'email' in data and data['email']:
+        user.email = data['email']
+    if 'password' in data and data['password']:
+        if len(data['password']) >= 8:
+            user.password_hash = generate_password_hash(data['password'])
+    if 'profile_image_url' in data:
+        user.profile_image_url = data['profile_image_url']
+        
+    db.session.commit()
+    return jsonify({
+        'status': 'success', 
+        'message': 'Settings updated successfully',
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'role': user.role,
+            'email': user.email,
+            'profile_image_url': user.profile_image_url
+        }
+    }), 200
 
 
 @app.route('/api/password-reset-request', methods=['POST'])
@@ -549,6 +672,7 @@ def partner_request_audit():
 # --- Admin Endpoints ---
 
 @app.route('/api/admin/labs', methods=['POST'])
+@require_admin
 def add_lab():
     data = request.json
     lab = Lab(name=data.get('name'), address=data.get('address'), email=data.get('email'), phone=data.get('phone'))
@@ -601,6 +725,7 @@ def admin_overview():
     }), 200
 
 @app.route('/api/admin/onboarding/approve', methods=['POST'])
+@require_admin
 def approve_onboarding():
     data = request.json
     request_id = data.get('request_id')
@@ -629,6 +754,7 @@ def approve_onboarding():
     return jsonify({'status': 'success', 'message': 'Onboarding approved', 'restaurant_id': restaurant.id}), 200
 
 @app.route('/api/admin/onboarding/reject', methods=['POST'])
+@require_admin
 def reject_onboarding():
     data = request.json
     request_id = data.get('request_id')
@@ -651,6 +777,7 @@ def reject_onboarding():
     return jsonify({'status': 'success', 'message': 'Onboarding rejected'}), 200
 
 @app.route('/api/admin/audit/approve', methods=['POST'])
+@require_admin
 def approve_audit_request():
     data = request.json
     audit_id = data.get('audit_id')
@@ -665,6 +792,7 @@ def approve_audit_request():
     return jsonify({'status': 'success', 'message': 'Audit request approved'}), 200
 
 @app.route('/api/admin/audit/complete', methods=['POST'])
+@require_admin
 def complete_audit():
     data = request.json
     audit_id = data.get('audit_id')
@@ -763,6 +891,7 @@ def partner_update_shop():
     return jsonify({'status': 'success', 'message': 'Restaurant updated'}), 200
 
 @app.route('/api/admin/shop/update', methods=['POST'])
+@require_admin
 def admin_update_shop():
     data = request.json
     restaurant_id = data.get('restaurant_id')
@@ -801,6 +930,7 @@ def get_home_config():
     return jsonify({'status': 'success', 'data': payload}), 200
 
 @app.route('/api/admin/home-config', methods=['POST'])
+@require_admin
 def update_home_config():
     data = request.json
     key = data.get('key')
@@ -819,13 +949,154 @@ def update_home_config():
 
     return jsonify({'status': 'success', 'message': 'Home config updated'}), 200
 
+# --- Testimonial Endpoints ---
+
+@app.route('/api/testimonials', methods=['GET'])
+def get_testimonials():
+    featured_only = request.args.get('featured', 'false').lower() == 'true'
+    query = Testimonial.query
+    if featured_only:
+        query = query.filter_by(is_featured=True)
+    testimonials = query.order_by(Testimonial.created_at.desc()).all()
+    return jsonify([{
+        'id': t.id,
+        'name': t.name,
+        'role': t.role,
+        'content': t.content,
+        'avatar_url': t.avatar_url,
+        'is_featured': t.is_featured,
+        'created_at': t.created_at.isoformat() if t.created_at else None
+    } for t in testimonials])
+
+@app.route('/api/admin/testimonials', methods=['POST'])
+@require_admin
+def create_testimonial():
+    data = request.json
+    t = Testimonial(
+        name=data.get('name', ''),
+        role=data.get('role', 'Consumer'),
+        content=data.get('content', ''),
+        avatar_url=data.get('avatar_url', ''),
+        is_featured=data.get('is_featured', False)
+    )
+    db.session.add(t)
+    db.session.commit()
+    return jsonify({'id': t.id, 'message': 'Testimonial created'}), 201
+
+@app.route('/api/admin/testimonials/<int:tid>', methods=['PUT'])
+@require_admin
+def update_testimonial(tid):
+    t = Testimonial.query.get_or_404(tid)
+    data = request.json
+    t.name = data.get('name', t.name)
+    t.role = data.get('role', t.role)
+    t.content = data.get('content', t.content)
+    t.avatar_url = data.get('avatar_url', t.avatar_url)
+    t.is_featured = data.get('is_featured', t.is_featured)
+    db.session.commit()
+    return jsonify({'message': 'Testimonial updated'})
+
+@app.route('/api/admin/testimonials/<int:tid>', methods=['DELETE'])
+@require_admin
+def delete_testimonial(tid):
+    t = Testimonial.query.get_or_404(tid)
+    db.session.delete(t)
+    db.session.commit()
+    return jsonify({'message': 'Testimonial deleted'})
+
+# --- Trust Story Block Endpoints ---
+
+@app.route('/api/trust-stories', methods=['GET'])
+def get_trust_stories():
+    blocks = TrustStoryBlock.query.order_by(TrustStoryBlock.position).all()
+    result = []
+    for b in blocks:
+        block_data = {
+            'id': b.id,
+            'block_type': b.block_type,
+            'position': b.position,
+            'config': json.loads(b.config) if b.config else {},
+            'created_at': b.created_at.isoformat() if b.created_at else None
+        }
+        # If testimonial type, include the testimonial data
+        if b.block_type == 'testimonial':
+            config = json.loads(b.config) if b.config else {}
+            tid = config.get('testimonial_id')
+            if tid:
+                t = Testimonial.query.get(tid)
+                if t:
+                    block_data['testimonial'] = {
+                        'id': t.id,
+                        'name': t.name,
+                        'role': t.role,
+                        'content': t.content,
+                        'avatar_url': t.avatar_url
+                    }
+        result.append(block_data)
+    return jsonify(result)
+
+@app.route('/api/admin/trust-stories', methods=['POST'])
+@require_admin
+def create_trust_story_block():
+    data = request.json
+    max_pos = db.session.query(db.func.max(TrustStoryBlock.position)).scalar() or 0
+    block = TrustStoryBlock(
+        block_type=data.get('block_type', 'text'),
+        position=data.get('position', max_pos + 1),
+        config=json.dumps(data.get('config', {}))
+    )
+    db.session.add(block)
+    db.session.commit()
+    return jsonify({'id': block.id, 'message': 'Block created'}), 201
+
+@app.route('/api/admin/trust-stories/<int:bid>', methods=['PUT'])
+@require_admin
+def update_trust_story_block(bid):
+    block = TrustStoryBlock.query.get_or_404(bid)
+    data = request.json
+    if 'block_type' in data:
+        block.block_type = data['block_type']
+    if 'position' in data:
+        block.position = data['position']
+    if 'config' in data:
+        block.config = json.dumps(data['config'])
+    db.session.commit()
+    return jsonify({'message': 'Block updated'})
+
+@app.route('/api/admin/trust-stories/<int:bid>', methods=['DELETE'])
+@require_admin
+def delete_trust_story_block(bid):
+    block = TrustStoryBlock.query.get_or_404(bid)
+    db.session.delete(block)
+    db.session.commit()
+    return jsonify({'message': 'Block deleted'})
+
+@app.route('/api/admin/trust-stories/reorder', methods=['POST'])
+@require_admin
+def reorder_trust_story_blocks():
+    data = request.json  # [{"id": 1, "position": 0}, {"id": 2, "position": 1}, ...]
+    if not isinstance(data, list):
+        return jsonify({'error': 'Expected array of {id, position}'}), 400
+    for item in data:
+        block = TrustStoryBlock.query.get(item.get('id'))
+        if block:
+            block.position = item.get('position', block.position)
+    db.session.commit()
+    return jsonify({'message': 'Blocks reordered'})
+
 # --- Consumer Endpoints ---
 
 @app.route('/api/consumer/review', methods=['POST'])
 def post_review():
     data = request.json
+    restaurant_id = data.get('restaurant_id')
+    if not restaurant_id:
+        return jsonify({'status': 'error', 'message': 'restaurant_id is required'}), 400
+    restaurant = Restaurant.query.get(restaurant_id)
+    if not restaurant:
+        return jsonify({'status': 'error', 'message': 'Restaurant not found'}), 404
     review = Review(
-        restaurant_id=data.get('restaurant_id'),
+        restaurant_id=restaurant_id,
         user_id=data.get('user_id'),
         reviewer_name=data.get('reviewer_name', 'Anonymous'),
         content=data.get('content')
@@ -834,8 +1105,21 @@ def post_review():
     db.session.commit()
     return jsonify({'status': 'success', 'message': 'Review posted'}), 201
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+@app.route('/api/consumer/safety-report', methods=['POST'])
+def post_safety_report():
+    """Endpoint for consumers to report safety concerns."""
+    data = request.json
+    restaurant_name = data.get('restaurant_name', 'Unknown')
+    details = data.get('details', '')
+    user_id = data.get('user_id')
+    if not details:
+        return jsonify({'status': 'error', 'message': 'Incident details are required'}), 400
+    create_notification(
+        f"SAFETY OVERRIDE: Report for \"{restaurant_name}\" — {details}",
+        notification_type='error',
+        recipient_role='admin'
+    )
+    return jsonify({'status': 'success', 'message': 'Safety report submitted. Our team will review this immediately.'}), 201
 
 # --- Google OAuth Routes ---
 import urllib.parse
@@ -931,6 +1215,7 @@ def google_callback():
     )
 
     frontend_url = app.config['FRONTEND_URL'] or 'http://localhost:5173'
-    return flask_redirect(f"{frontend_url}/google-auth-success?token={token}&role={user.role}&username={user.username}")
+    return flask_redirect(f"{frontend_url}/google-auth-success?token={token}&role={user.role}&username={user.username}&id={user.id}")
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

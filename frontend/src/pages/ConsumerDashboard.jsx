@@ -42,12 +42,30 @@ export default function ConsumerDashboard() {
     }
   };
 
-  const handleReportSubmit = (e) => {
+  const handleReportSubmit = async (e) => {
     e.preventDefault();
-    // In a real app, this would hit a report endpoint
-    alert(`Report submitted for ${reportRestaurant}. Our AI trigger system will review this immediately.`);
-    setReportContent('');
-    setReportRestaurant('');
+    try {
+      const res = await fetch(`${API_BASE}/consumer/safety-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restaurant_name: reportRestaurant,
+          details: reportContent,
+          user_id: user.id
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Safety report submitted. Our team will review this immediately.');
+        setReportContent('');
+        setReportRestaurant('');
+      } else {
+        alert('Failed: ' + (data.message || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error while submitting safety report.');
+    }
   };
 
   return (

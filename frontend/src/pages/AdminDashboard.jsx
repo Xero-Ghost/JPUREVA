@@ -4,7 +4,8 @@ import { Navigate } from 'react-router-dom';
 import { API_BASE } from '../config';
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
+  const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
   const [labName, setLabName] = useState('');
   const [labAddress, setLabAddress] = useState('');
   const [labEmail, setLabEmail] = useState('');
@@ -36,6 +37,12 @@ export default function AdminDashboard() {
     reels: ''
   });
   const [auditCompletion, setAuditCompletion] = useState({});
+  const [testimonials, setTestimonials] = useState([]);
+  const [newTestimonial, setNewTestimonial] = useState({ name: '', role: 'Consumer', content: '', avatar_url: '', is_featured: false });
+  const [editingTestimonial, setEditingTestimonial] = useState(null);
+  const [storyBlocks, setStoryBlocks] = useState([]);
+  const [newBlockType, setNewBlockType] = useState('testimonial');
+  const [newBlockConfig, setNewBlockConfig] = useState({});
 
   const loadOverview = () => {
     fetch(`${API_BASE}/admin/overview`)
@@ -90,6 +97,20 @@ export default function AdminDashboard() {
       .catch((error) => console.error(error));
   }, []);
 
+  useEffect(() => {
+    fetch(`${API_BASE}/testimonials`)
+      .then(res => res.json())
+      .then(data => setTestimonials(data))
+      .catch(err => console.error('Failed to load testimonials', err));
+  }, []);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/trust-stories`)
+      .then(res => res.json())
+      .then(data => setStoryBlocks(data))
+      .catch(err => console.error('Failed to load trust stories', err));
+  }, []);
+
   if (!user || user.role !== 'admin') {
     return <Navigate to="/login" />;
   }
@@ -99,7 +120,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/labs`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ name: labName, address: labAddress, email: labEmail, phone: labPhone })
       });
       const data = await res.json();
@@ -141,7 +162,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/home-config`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ key: 'weekly_reels', value: payload })
       });
       const data = await res.json();
@@ -162,7 +183,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/onboarding/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ request_id: requestId })
       });
       const data = await res.json();
@@ -185,7 +206,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/onboarding/reject`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ request_id: requestId, reason })
       });
       const data = await res.json();
@@ -206,7 +227,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/audit/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ audit_id: auditId })
       });
       const data = await res.json();
@@ -235,7 +256,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/audit/complete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ audit_id: auditId, ...payload })
       });
       const data = await res.json();
@@ -289,7 +310,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/shop/update`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify(payload)
       });
       const data = await res.json();
@@ -317,6 +338,84 @@ export default function AdminDashboard() {
       throw new Error(data.message || 'Upload failed');
     }
     return data.url;
+  };
+
+  const handleCreateTestimonial = async () => {
+    if (!newTestimonial.name || !newTestimonial.content) return alert('Name and content are required');
+    const res = await fetch(`${API_BASE}/admin/testimonials`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify(newTestimonial)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setTestimonials(prev => [{ ...newTestimonial, id: data.id, created_at: new Date().toISOString() }, ...prev]);
+      setNewTestimonial({ name: '', role: 'Consumer', content: '', avatar_url: '', is_featured: false });
+    }
+  };
+
+  const handleDeleteTestimonial = async (id) => {
+    if (!confirm('Delete this testimonial?')) return;
+    const res = await fetch(`${API_BASE}/admin/testimonials/${id}`, { method: 'DELETE', headers: authHeaders });
+    if (res.ok) setTestimonials(prev => prev.filter(t => t.id !== id));
+  };
+
+  const handleUpdateTestimonial = async (id) => {
+    const res = await fetch(`${API_BASE}/admin/testimonials/${id}`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify(editingTestimonial)
+    });
+    if (res.ok) {
+      setTestimonials(prev => prev.map(t => t.id === id ? { ...t, ...editingTestimonial } : t));
+      setEditingTestimonial(null);
+    }
+  };
+
+  const handleAddBlock = async () => {
+    const config = { ...newBlockConfig };
+    const res = await fetch(`${API_BASE}/admin/trust-stories`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ block_type: newBlockType, config })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setStoryBlocks(prev => [...prev, { id: data.id, block_type: newBlockType, config, position: prev.length }]);
+      setNewBlockConfig({});
+    }
+  };
+
+  const handleDeleteBlock = async (id) => {
+    if (!confirm('Remove this block?')) return;
+    const res = await fetch(`${API_BASE}/admin/trust-stories/${id}`, { method: 'DELETE', headers: authHeaders });
+    if (res.ok) setStoryBlocks(prev => prev.filter(b => b.id !== id));
+  };
+
+  const handleMoveBlock = async (index, direction) => {
+    const newBlocks = [...storyBlocks];
+    const swapIndex = index + direction;
+    if (swapIndex < 0 || swapIndex >= newBlocks.length) return;
+    [newBlocks[index], newBlocks[swapIndex]] = [newBlocks[swapIndex], newBlocks[index]];
+    const reordered = newBlocks.map((b, i) => ({ ...b, position: i }));
+    setStoryBlocks(reordered);
+    await fetch(`${API_BASE}/admin/trust-stories/reorder`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify(reordered.map(b => ({ id: b.id, position: b.position })))
+    });
+  };
+
+  const handleBlockFileUpload = async (e, field) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const url = await uploadFile(file);
+      setNewBlockConfig(prev => ({ ...prev, [field]: url }));
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    }
   };
 
   const handleCoverUpload = async (e) => {
@@ -590,6 +689,365 @@ export default function AdminDashboard() {
           </form>
         </div>
 
+        {/* Manage Testimonials */}
+        <div className="bg-surface border border-outline-variant p-6 rounded-xl shadow-sm md:col-span-2">
+          <h2 className="font-headline-lg text-headline-lg mb-4 border-b border-surface-variant pb-2 flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">format_quote</span>
+            Manage Testimonials
+            <span className="ml-auto text-sm bg-primary/10 text-primary px-2.5 py-0.5 rounded-full">{testimonials.length}</span>
+          </h2>
+
+          {/* Add New Testimonial Form */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-lg p-4 mb-6">
+            <h3 className="text-sm font-label-caps uppercase text-muted-stone mb-3">Add New Testimonial</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder="Name"
+                value={newTestimonial.name}
+                onChange={(e) => setNewTestimonial(prev => ({ ...prev, name: e.target.value }))}
+                className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest"
+              />
+              <select
+                value={newTestimonial.role}
+                onChange={(e) => setNewTestimonial(prev => ({ ...prev, role: e.target.value }))}
+                className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest"
+              >
+                <option value="Consumer">Consumer</option>
+                <option value="Partner">Partner</option>
+                <option value="Critic">Critic</option>
+              </select>
+              <textarea
+                placeholder="Testimonial content..."
+                value={newTestimonial.content}
+                onChange={(e) => setNewTestimonial(prev => ({ ...prev, content: e.target.value }))}
+                className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest md:col-span-2"
+                rows={3}
+              />
+              <input
+                type="url"
+                placeholder="Avatar URL (optional)"
+                value={newTestimonial.avatar_url}
+                onChange={(e) => setNewTestimonial(prev => ({ ...prev, avatar_url: e.target.value }))}
+                className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest"
+              />
+              <label className="flex items-center gap-2 p-3">
+                <input
+                  type="checkbox"
+                  checked={newTestimonial.is_featured}
+                  onChange={(e) => setNewTestimonial(prev => ({ ...prev, is_featured: e.target.checked }))}
+                  className="w-4 h-4 accent-primary"
+                />
+                <span className="text-sm text-charcoal-black">Featured</span>
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={handleCreateTestimonial}
+              className="mt-3 bg-primary text-on-primary py-2 px-6 rounded-lg text-sm uppercase tracking-widest font-label-caps hover:bg-primary-container transition-colors"
+            >
+              Create Testimonial
+            </button>
+          </div>
+
+          {/* Existing Testimonials */}
+          <div className="space-y-3">
+            {testimonials.length === 0 ? (
+              <p className="text-muted-stone text-center py-6">No testimonials yet.</p>
+            ) : (
+              testimonials.map((t) => (
+                <div key={t.id} className="border border-outline-variant rounded-lg p-4">
+                  {editingTestimonial && editingTestimonial.id === t.id ? (
+                    /* Inline Edit Form */
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input
+                          type="text"
+                          value={editingTestimonial.name}
+                          onChange={(e) => setEditingTestimonial(prev => ({ ...prev, name: e.target.value }))}
+                          className="p-2 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm"
+                          placeholder="Name"
+                        />
+                        <select
+                          value={editingTestimonial.role}
+                          onChange={(e) => setEditingTestimonial(prev => ({ ...prev, role: e.target.value }))}
+                          className="p-2 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm"
+                        >
+                          <option value="Consumer">Consumer</option>
+                          <option value="Partner">Partner</option>
+                          <option value="Critic">Critic</option>
+                        </select>
+                      </div>
+                      <textarea
+                        value={editingTestimonial.content}
+                        onChange={(e) => setEditingTestimonial(prev => ({ ...prev, content: e.target.value }))}
+                        className="w-full p-2 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm"
+                        rows={3}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateTestimonial(t.id)}
+                          className="bg-primary text-on-primary py-1.5 px-4 rounded-lg text-xs uppercase tracking-widest font-label-caps"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingTestimonial(null)}
+                          className="border border-outline-variant text-muted-stone py-1.5 px-4 rounded-lg text-xs uppercase tracking-widest font-label-caps"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Display Mode */
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-body-md text-charcoal-black font-semibold">{t.name}</span>
+                          <span className="text-xs text-muted-stone bg-surface-container-high px-2 py-0.5 rounded-full">{t.role}</span>
+                          {t.is_featured && (
+                            <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <span className="material-symbols-outlined text-xs">star</span> Featured
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-stone line-clamp-2">{t.content}</p>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setEditingTestimonial({ id: t.id, name: t.name, role: t.role, content: t.content, avatar_url: t.avatar_url, is_featured: t.is_featured })}
+                          className="text-sm text-primary hover:text-primary/80 transition-colors"
+                          title="Edit"
+                        >
+                          <span className="material-symbols-outlined text-base">edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTestimonial(t.id)}
+                          className="text-sm text-red-500 hover:text-red-700 transition-colors"
+                          title="Delete"
+                        >
+                          <span className="material-symbols-outlined text-base">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Trust Stories Page Builder */}
+        <div className="bg-surface border border-outline-variant p-6 rounded-xl shadow-sm md:col-span-2">
+          <h2 className="font-headline-lg text-headline-lg mb-4 border-b border-surface-variant pb-2 flex items-center gap-2">
+            <span className="material-symbols-outlined text-secondary">auto_stories</span>
+            Trust Stories Page Builder
+            <span className="ml-auto text-sm bg-secondary/10 text-secondary px-2.5 py-0.5 rounded-full">{storyBlocks.length} blocks</span>
+          </h2>
+
+          {/* Add Block Form */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-lg p-4 mb-6">
+            <h3 className="text-sm font-label-caps uppercase text-muted-stone mb-3">Add New Block</h3>
+            <div className="space-y-3">
+              <select
+                value={newBlockType}
+                onChange={(e) => { setNewBlockType(e.target.value); setNewBlockConfig({}); }}
+                className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest w-full"
+              >
+                <option value="testimonial">Testimonial</option>
+                <option value="image">Image</option>
+                <option value="video">Video</option>
+                <option value="text">Text</option>
+                <option value="document">Document</option>
+              </select>
+
+              {/* Dynamic config fields based on type */}
+              {newBlockType === 'testimonial' && (
+                <select
+                  value={newBlockConfig.testimonial_id || ''}
+                  onChange={(e) => setNewBlockConfig({ testimonial_id: parseInt(e.target.value) })}
+                  className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest w-full"
+                >
+                  <option value="">Select a testimonial...</option>
+                  {testimonials.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name} — {t.content?.substring(0, 60)}...</option>
+                  ))}
+                </select>
+              )}
+
+              {newBlockType === 'image' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input
+                    type="url"
+                    placeholder="Image URL"
+                    value={newBlockConfig.image_url || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, image_url: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Caption (optional)"
+                    value={newBlockConfig.caption || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, caption: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest"
+                  />
+                  <div className="md:col-span-2">
+                    <label className="block text-label-caps uppercase text-muted-stone mb-2">Upload Image</label>
+                    <input type="file" accept="image/*" onChange={(e) => handleBlockFileUpload(e, 'image_url')} />
+                  </div>
+                </div>
+              )}
+
+              {newBlockType === 'video' && (
+                <div className="space-y-3">
+                  <input
+                    type="url"
+                    placeholder="Video URL"
+                    value={newBlockConfig.video_url || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, video_url: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest w-full"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Caption (optional)"
+                    value={newBlockConfig.caption || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, caption: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest w-full"
+                  />
+                  <p className="text-xs text-muted-stone flex items-center gap-1">
+                    <span className="material-symbols-outlined text-sm">info</span>
+                    Supports Instagram & YouTube links
+                  </p>
+                </div>
+              )}
+
+              {newBlockType === 'text' && (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Title"
+                    value={newBlockConfig.title || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, title: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest w-full"
+                  />
+                  <textarea
+                    placeholder="Body text..."
+                    value={newBlockConfig.body || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, body: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest w-full"
+                    rows={4}
+                  />
+                </div>
+              )}
+
+              {newBlockType === 'document' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input
+                    type="url"
+                    placeholder="Document URL"
+                    value={newBlockConfig.document_url || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, document_url: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Title"
+                    value={newBlockConfig.title || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, title: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest"
+                  />
+                  <textarea
+                    placeholder="Description (optional)"
+                    value={newBlockConfig.description || ''}
+                    onChange={(e) => setNewBlockConfig(prev => ({ ...prev, description: e.target.value }))}
+                    className="p-3 border border-outline-variant rounded-lg bg-surface-container-lowest md:col-span-2"
+                    rows={2}
+                  />
+                  <div className="md:col-span-2">
+                    <label className="block text-label-caps uppercase text-muted-stone mb-2">Upload Document</label>
+                    <input type="file" onChange={(e) => handleBlockFileUpload(e, 'document_url')} />
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleAddBlock}
+                className="bg-secondary text-on-primary py-2 px-6 rounded-lg text-sm uppercase tracking-widest font-label-caps hover:opacity-90 transition-opacity"
+              >
+                Add Block
+              </button>
+            </div>
+          </div>
+
+          {/* Current Blocks List */}
+          <div className="space-y-2">
+            {storyBlocks.length === 0 ? (
+              <p className="text-muted-stone text-center py-6">No blocks added yet. Add blocks above to build the Trust Stories page.</p>
+            ) : (
+              storyBlocks.map((block, index) => {
+                const typeBadgeColors = {
+                  testimonial: 'bg-primary/10 text-primary',
+                  image: 'bg-secondary/10 text-secondary',
+                  video: 'bg-tertiary/10 text-tertiary',
+                  text: 'bg-on-surface/10 text-on-surface/60',
+                  document: 'bg-blue-100 text-blue-700'
+                };
+                const badgeColor = typeBadgeColors[block.block_type] || 'bg-surface-container-high text-muted-stone';
+                let preview = '';
+                if (block.block_type === 'testimonial' && block.testimonial) {
+                  preview = `${block.testimonial.name}: "${block.testimonial.content?.substring(0, 50)}..."`;
+                } else if (block.config) {
+                  preview = block.config.caption || block.config.title || block.config.image_url || block.config.video_url || block.config.document_url || '';
+                  if (preview.length > 60) preview = preview.substring(0, 60) + '...';
+                }
+                return (
+                  <div key={block.id} className="flex items-center gap-3 border border-outline-variant rounded-lg p-3">
+                    <span className="text-sm text-muted-stone w-6 text-center">#{index + 1}</span>
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-label-caps uppercase ${badgeColor}`}>
+                      {block.block_type}
+                    </span>
+                    <span className="flex-1 text-sm text-charcoal-black truncate">{preview}</span>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleMoveBlock(index, -1)}
+                        disabled={index === 0}
+                        className="p-1 text-muted-stone hover:text-charcoal-black disabled:opacity-30 transition-colors"
+                        title="Move up"
+                      >
+                        <span className="material-symbols-outlined text-base">arrow_upward</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMoveBlock(index, 1)}
+                        disabled={index === storyBlocks.length - 1}
+                        className="p-1 text-muted-stone hover:text-charcoal-black disabled:opacity-30 transition-colors"
+                        title="Move down"
+                      >
+                        <span className="material-symbols-outlined text-base">arrow_downward</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBlock(block.id)}
+                        className="p-1 text-red-500 hover:text-red-700 transition-colors"
+                        title="Delete block"
+                      >
+                        <span className="material-symbols-outlined text-base">delete</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
         {/* Home Page Config */}
         <div className="bg-surface border border-outline-variant p-6 rounded-xl shadow-sm md:col-span-2">
           <h2 className="font-headline-lg text-headline-lg mb-4 border-b border-surface-variant pb-2 flex items-center gap-2">
@@ -624,6 +1082,14 @@ export default function AdminDashboard() {
                     >
                       Remove
                     </button>
+                    {reel.url && reel.url.includes('instagram.com') && (
+                      <div className="mt-2 rounded-xl overflow-hidden" style={{ maxWidth: '200px', aspectRatio: '9/16' }}>
+                        <iframe
+                          src={`https://www.instagram.com/reel/${reel.url.match(/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/)?.[1]}/embed/`}
+                          className="w-full h-full border-none"
+                          title="Reel Preview" />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

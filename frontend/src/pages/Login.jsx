@@ -62,7 +62,7 @@ export default function Login() {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(isRegistering ? { username, password, role, email, confirmPassword } : { username, password })
+        body: JSON.stringify(isRegistering ? { username, password, role, email, confirmPassword } : { email, password })
       });
       const data = await response.json();
 
@@ -206,34 +206,33 @@ export default function Login() {
                   >
                     <option value="consumer">Consumer (Leave Reviews)</option>
                     <option value="partner">Partner (Shop Owner)</option>
-                    <option value="admin">Administrator</option>
                   </select>
                 </div>
               )}
 
+              <div>
+                <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Email</label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-3xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
+                />
+              </div>
+
               {isRegistering && (
                 <div>
-                  <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Email</label>
+                  <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Username</label>
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
                     className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-3xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
                   />
                 </div>
               )}
-
-              <div>
-                <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Username</label>
-                <input
-                  type="text"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-3xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
-                />
-              </div>
 
               <div>
                 <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Password</label>

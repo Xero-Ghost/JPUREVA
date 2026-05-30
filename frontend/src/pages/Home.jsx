@@ -1,11 +1,74 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { API_BASE } from '../config';
 
+/* ── helpers ─────────────────────────────────────────────────────── */
+
+const extractInstagramId = (url) => {
+  if (!url) return null;
+  const match = url.match(/instagram\.com\/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/);
+  return match ? match[1] : null;
+};
+
+const FALLBACK_TESTIMONIALS = [
+  {
+    initials: 'SJ',
+    name: 'Sarah Jenkins',
+    role: 'Consumer',
+    color: 'primary',
+    quote:
+      '"Knowing that a restaurant has the FoodTrust badge completely changes where we choose to eat. Absolute peace of mind."',
+  },
+  {
+    initials: 'MP',
+    name: 'M. Patel',
+    role: 'Consumer',
+    color: 'secondary',
+    quote:
+      '"The audit reports linked directly from the menu QR code are brilliant. Transparent and easy to read."',
+  },
+  {
+    initials: 'MT',
+    name: 'Marcus Thorne',
+    role: 'Partner',
+    color: 'tertiary',
+    quote:
+      '"Achieving the FoodTrust certification wasn\'t easy, but the rigid protocols transformed our kitchen culture."',
+  },
+];
+
+/* ── breakpoint helper ───────────────────────────────────────────── */
+
+const getVisibleCards = (width) => {
+  if (width >= 1024) return 3; // lg
+  if (width >= 768) return 2;  // md
+  return 1;                    // mobile
+};
+
+/* ── component ───────────────────────────────────────────────────── */
+
 export default function Home() {
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState('');
+
+  /* ── existing reel state ────────────────────────────────────────── */
   const [weeklyReels, setWeeklyReels] = useState([]);
   const [reelsLoading, setReelsLoading] = useState(true);
 
+  /* ── new testimonial state ──────────────────────────────────────── */
+  const [testimonials, setTestimonials] = useState([]);
+  const [testimonialsLoading, setTestimonialsLoading] = useState(true);
+
+  /* ── carousel state ─────────────────────────────────────────────── */
+  const [testimonialSlide, setTestimonialSlide] = useState(0);
+  const [reelSlide, setReelSlide] = useState(0);
+  const [visibleCards, setVisibleCards] = useState(() => getVisibleCards(window.innerWidth));
+
+  /* ── refs for hover-pause ───────────────────────────────────────── */
+  const testimonialHovered = useRef(false);
+  const reelHovered = useRef(false);
+
+  /* ── fetch reels (unchanged) ────────────────────────────────────── */
   useEffect(() => {
     fetch(`${API_BASE}/home-config?key=weekly_reels`)
       .then(res => res.json())
@@ -17,6 +80,79 @@ export default function Home() {
       })
       .catch(() => setReelsLoading(false));
   }, []);
+
+  /* ── fetch testimonials ─────────────────────────────────────────── */
+  useEffect(() => {
+    fetch(`${API_BASE}/testimonials?featured=true`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setTestimonials(data);
+        } else if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+          setTestimonials(data.data);
+        } else {
+          setTestimonials(FALLBACK_TESTIMONIALS);
+        }
+        setTestimonialsLoading(false);
+      })
+      .catch(() => {
+        setTestimonials(FALLBACK_TESTIMONIALS);
+        setTestimonialsLoading(false);
+      });
+  }, []);
+
+  /* ── responsive listener ────────────────────────────────────────── */
+  useEffect(() => {
+    const onResize = () => setVisibleCards(getVisibleCards(window.innerWidth));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  /* ── carousel navigation helpers ────────────────────────────────── */
+  const testimonialCards = testimonials.length > 0 ? testimonials : FALLBACK_TESTIMONIALS;
+  const reelCards = weeklyReels.length > 0 ? weeklyReels : [1, 2, 3, 4];
+
+  const testimonialMaxSlide = Math.max(0, testimonialCards.length - visibleCards);
+  const reelMaxSlide = Math.max(0, reelCards.length - visibleCards);
+
+  const prevTestimonial = useCallback(() => setTestimonialSlide(s => Math.max(0, s - 1)), []);
+  const nextTestimonial = useCallback(() => setTestimonialSlide(s => Math.min(testimonialMaxSlide, s + 1)), [testimonialMaxSlide]);
+
+  const prevReel = useCallback(() => setReelSlide(s => Math.max(0, s - 1)), []);
+  const nextReel = useCallback(() => setReelSlide(s => Math.min(reelMaxSlide, s + 1)), [reelMaxSlide]);
+
+  /* clamp slides when visible cards change */
+  useEffect(() => {
+    setTestimonialSlide(s => Math.min(s, testimonialMaxSlide));
+  }, [testimonialMaxSlide]);
+
+  useEffect(() => {
+    setReelSlide(s => Math.min(s, reelMaxSlide));
+  }, [reelMaxSlide]);
+
+  /* ── auto-advance testimonials ──────────────────────────────────── */
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!testimonialHovered.current) {
+        setTestimonialSlide(s => (s >= testimonialMaxSlide ? 0 : s + 1));
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [testimonialMaxSlide]);
+
+  /* ── auto-advance reels ─────────────────────────────────────────── */
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!reelHovered.current) {
+        setReelSlide(s => (s >= reelMaxSlide ? 0 : s + 1));
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [reelMaxSlide]);
+
+  /* ── slide widths (card + gap) ──────────────────────────────────── */
+  const testimonialSlideWidth = 350 + 24; // w-[350px] + gap-6
+  const reelSlideWidth = window.innerWidth >= 768 ? 300 + 24 : 280 + 24; // w-[280px] md:w-[300px] + gap-6
 
   return (
     <>
@@ -36,15 +172,27 @@ export default function Home() {
               We enforce strict hygiene protocols, conduct rigorous lab tests, and verify taste quality. Search for NABL-accredited and certified dining establishments.
             </p>
             {/* Search Bar */}
-            <div className="mt-4 bg-surface p-2 rounded-xl border border-outline-variant shadow-[0_4px_16px_rgba(0,0,0,0.04)] flex flex-col md:flex-row gap-2 max-w-[700px]">
+            <form
+              className="mt-4 bg-surface p-2 rounded-xl border border-outline-variant shadow-[0_4px_16px_rgba(0,0,0,0.04)] flex flex-col md:flex-row gap-2 max-w-[700px]"
+              onSubmit={(e) => { e.preventDefault(); navigate(`/directory${searchQuery.trim() ? `?q=${encodeURIComponent(searchQuery.trim())}` : ''}`); }}
+            >
               <div className="flex-grow flex items-center gap-3 px-4 py-3 bg-surface-container-lowest rounded-lg border border-transparent focus-within:border-outline focus-within:ring-2 focus-within:ring-outline/20 transition-all">
                 <span className="material-symbols-outlined text-outline">search</span>
-                <input className="w-full bg-transparent border-none outline-none font-body-md text-body-md text-on-background placeholder:text-outline p-0" placeholder="Search for Trusted Restaurants by name or ID..." type="text" />
+                <input
+                  className="w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 font-body-md text-body-md text-on-background placeholder:text-outline p-0"
+                  placeholder="Search for Trusted Restaurants by name or ID..."
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-              <Link to="/directory" className="bg-primary text-on-primary font-body-md text-body-md px-8 py-3 rounded-lg border border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] hover:bg-primary-container transition-colors font-semibold flex items-center justify-center gap-2 whitespace-nowrap">
+              <button
+                type="submit"
+                className="bg-primary text-on-primary font-body-md text-body-md px-8 py-3 rounded-lg border border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] hover:bg-primary-container transition-colors font-semibold flex items-center justify-center gap-2 whitespace-nowrap"
+              >
                 Audit Search
-              </Link>
-            </div>
+              </button>
+            </form>
             <div className="flex items-center gap-4 mt-2">
               <div className="flex -space-x-3">
                 <div className="w-10 h-10 rounded-full border-2 border-surface bg-surface-container flex items-center justify-center overflow-hidden">
@@ -146,85 +294,194 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Weekly Trust Stories */}
-      <section className="py-stack-lg px-margin-mobile md:px-margin-desktop bg-surface-container-lowest overflow-hidden">
+      {/* ────────────────────────────────────────────────────────────── */}
+      {/* Weekly Trust Stories — CAROUSEL                               */}
+      {/* ────────────────────────────────────────────────────────────── */}
+      <section className="py-stack-lg px-margin-mobile md:px-margin-desktop bg-surface-container-lowest">
         <div className="max-w-container-max mx-auto mb-stack-md text-center">
           <h2 className="font-headline-xl text-headline-xl text-on-background">Weekly Trust Stories</h2>
           <p className="font-body-md text-body-md text-on-surface-variant mt-2">Real experiences verified by science.</p>
         </div>
-        <div className="max-w-container-max mx-auto overflow-x-auto pb-8" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-          <div className="flex gap-6 w-max px-4">
-            {/* Story 1 */}
-            <div className="w-[350px] bg-paper-white border border-surface-variant p-6 rounded-xl flex flex-col shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center text-primary font-bold">SJ</div>
-                <div>
-                  <h4 className="font-body-md text-body-md font-semibold text-on-surface">Sarah Jenkins</h4>
-                  <span className="font-label-caps text-label-caps text-muted-stone">Consumer</span>
-                </div>
-              </div>
-              <p className="font-quote text-quote text-on-surface mb-4 flex-grow">"Knowing that a restaurant has the FoodTrust badge completely changes where we choose to eat. Absolute peace of mind."</p>
-            </div>
-            {/* Story 2 */}
-            <div className="w-[350px] bg-paper-white border border-surface-variant p-6 rounded-xl flex flex-col shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-secondary/10 rounded-full flex items-center justify-center text-secondary font-bold">MP</div>
-                <div>
-                  <h4 className="font-body-md text-body-md font-semibold text-on-surface">M. Patel</h4>
-                  <span className="font-label-caps text-label-caps text-muted-stone">Consumer</span>
-                </div>
-              </div>
-              <p className="font-quote text-quote text-on-surface mb-4 flex-grow">"The audit reports linked directly from the menu QR code are brilliant. Transparent and easy to read."</p>
-            </div>
-            {/* Story 3 */}
-            <div className="w-[350px] bg-paper-white border border-surface-variant p-6 rounded-xl flex flex-col shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-tertiary/10 rounded-full flex items-center justify-center text-tertiary font-bold">MT</div>
-                <div>
-                  <h4 className="font-body-md text-body-md font-semibold text-on-surface">Marcus Thorne</h4>
-                  <span className="font-label-caps text-label-caps text-muted-stone">Partner</span>
-                </div>
-              </div>
-              <p className="font-quote text-quote text-on-surface mb-4 flex-grow">"Achieving the FoodTrust certification wasn't easy, but the rigid protocols transformed our kitchen culture."</p>
+
+        <div
+          className="max-w-container-max mx-auto relative"
+          onMouseEnter={() => { testimonialHovered.current = true; }}
+          onMouseLeave={() => { testimonialHovered.current = false; }}
+        >
+          {/* arrows */}
+          <button
+            className="carousel-arrow carousel-arrow--left"
+            onClick={prevTestimonial}
+            disabled={testimonialSlide === 0}
+          >
+            <span className="material-symbols-outlined text-lg">chevron_left</span>
+          </button>
+          <button
+            className="carousel-arrow carousel-arrow--right"
+            onClick={nextTestimonial}
+            disabled={testimonialSlide >= testimonialMaxSlide}
+          >
+            <span className="material-symbols-outlined text-lg">chevron_right</span>
+          </button>
+
+          {/* track */}
+          <div className="overflow-hidden">
+            <div
+              className="flex gap-6 transition-transform duration-500 ease-in-out"
+              style={{ transform: `translateX(-${testimonialSlide * testimonialSlideWidth}px)` }}
+            >
+              {testimonialCards.map((t, index) => {
+                const initials = t.initials || (t.name ? t.name.split(' ').map(w => w[0]).join('') : '??');
+                const colorClass = t.color || ['primary', 'secondary', 'tertiary'][index % 3];
+                return (
+                  <div
+                    key={(t.name || 'testimonial') + index}
+                    className="w-[350px] flex-shrink-0 bg-paper-white border border-surface-variant p-6 rounded-xl flex flex-col shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className={`w-10 h-10 bg-${colorClass}/10 rounded-full flex items-center justify-center text-${colorClass} font-bold`}>
+                        {initials}
+                      </div>
+                      <div>
+                        <h4 className="font-body-md text-body-md font-semibold text-on-surface">{t.name}</h4>
+                        <span className="font-label-caps text-label-caps text-muted-stone">{t.role || 'Consumer'}</span>
+                      </div>
+                    </div>
+                    <p className="font-quote text-quote text-on-surface mb-4 flex-grow">{t.quote || t.text || ''}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
+
+          {/* dots */}
+          <div className="carousel-dots">
+            {Array.from({ length: testimonialMaxSlide + 1 }).map((_, i) => (
+              <button
+                key={i}
+                className={`carousel-dot${i === testimonialSlide ? ' carousel-dot--active' : ''}`}
+                onClick={() => setTestimonialSlide(i)}
+                aria-label={`Go to slide ${i + 1}`}
+              />
+            ))}
+          </div>
         </div>
-        <style dangerouslySetInnerHTML={{__html: `::-webkit-scrollbar { display: none; }`}} />
       </section>
 
-      {/* Weekly Reels */}
-      <section className="py-stack-lg px-margin-mobile md:px-margin-desktop bg-surface border-t border-surface-variant overflow-hidden">
+      {/* ────────────────────────────────────────────────────────────── */}
+      {/* Weekly Reels — CAROUSEL with Instagram Embeds                 */}
+      {/* ────────────────────────────────────────────────────────────── */}
+      <section className="py-stack-lg px-margin-mobile md:px-margin-desktop bg-surface border-t border-surface-variant">
         <div className="max-w-container-max mx-auto mb-stack-md text-center">
           <h2 className="font-headline-xl text-headline-xl text-on-background">FoodTrust Weekly Reels</h2>
           <p className="font-body-md text-body-md text-on-surface-variant mt-2">Catch up on our latest kitchen tours and lab insights.</p>
         </div>
-        <div className="max-w-container-max mx-auto overflow-x-auto pb-8" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-          <div className="flex gap-6 w-max px-4">
-            {(weeklyReels.length > 0 ? weeklyReels : [1, 2, 3, 4]).map((item, index) => {
-              const reelName = typeof item === 'object' ? item.name : `Instagram Reel ${item}`;
-              const reelUrl = typeof item === 'object' ? item.url : null;
-              return (
-                <div key={reelName + index} className="w-[280px] h-[480px] bg-surface-container-high rounded-xl overflow-hidden relative group flex items-center justify-center border border-surface-variant">
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-on-surface-variant px-6 text-center">
-                    <span className="material-symbols-outlined text-[48px] mb-4">movie</span>
-                    <p className="font-label-caps text-label-caps uppercase tracking-wider mb-3">{reelName || 'Instagram Reel'}</p>
-                    {reelUrl && (
-                      <a
-                        href={reelUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="bg-charcoal-black text-paper-white px-4 py-2 text-xs uppercase tracking-widest rounded-full"
-                      >
-                        Watch Reel
-                      </a>
+
+        <div
+          className="max-w-container-max mx-auto relative"
+          onMouseEnter={() => { reelHovered.current = true; }}
+          onMouseLeave={() => { reelHovered.current = false; }}
+        >
+          {/* arrows */}
+          <button
+            className="carousel-arrow carousel-arrow--left"
+            onClick={prevReel}
+            disabled={reelSlide === 0}
+          >
+            <span className="material-symbols-outlined text-lg">chevron_left</span>
+          </button>
+          <button
+            className="carousel-arrow carousel-arrow--right"
+            onClick={nextReel}
+            disabled={reelSlide >= reelMaxSlide}
+          >
+            <span className="material-symbols-outlined text-lg">chevron_right</span>
+          </button>
+
+          {/* track */}
+          <div className="overflow-hidden">
+            <div
+              className="flex gap-6 transition-transform duration-500 ease-in-out"
+              style={{ transform: `translateX(-${reelSlide * reelSlideWidth}px)` }}
+            >
+              {reelCards.map((item, index) => {
+                const reelName = typeof item === 'object' ? item.name : `Instagram Reel ${item}`;
+                const reelUrl = typeof item === 'object' ? item.url : null;
+                const reelId = extractInstagramId(reelUrl);
+                const isVideoUrl = reelUrl && /\.(mp4|webm|ogg)(\?|$)/i.test(reelUrl);
+
+                return (
+                  <div
+                    key={(reelName || 'reel') + index}
+                    className="w-[280px] md:w-[300px] flex-shrink-0"
+                  >
+                    {/* Instagram embed */}
+                    {reelId && (
+                      <div className="reel-embed-container h-[480px] rounded-xl overflow-hidden border border-surface-variant">
+                        <iframe
+                          src={`https://www.instagram.com/reel/${reelId}/embed/`}
+                          title={reelName || 'Instagram Reel'}
+                          className="w-full h-full border-0"
+                          allowFullScreen
+                          loading="lazy"
+                        />
+                      </div>
                     )}
-                    {!reelUrl && !reelsLoading && (
-                      <span className="text-xs text-muted-stone">Admin will add the reel link soon.</span>
+
+                    {/* Regular video */}
+                    {!reelId && isVideoUrl && (
+                      <div className="reel-embed-container h-[480px] rounded-xl overflow-hidden border border-surface-variant bg-surface-container-high">
+                        <video
+                          src={reelUrl}
+                          controls
+                          className="w-full h-full object-cover"
+                          preload="metadata"
+                        />
+                      </div>
+                    )}
+
+                    {/* Fallback preview card */}
+                    {!reelId && !isVideoUrl && (
+                      <div className="reel-preview-card h-[480px] rounded-xl overflow-hidden relative group flex items-center justify-center border border-surface-variant"
+                        style={{
+                          background: 'linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%)',
+                        }}
+                      >
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-white px-6 text-center">
+                          <span className="material-symbols-outlined text-[48px] mb-4 drop-shadow-lg">play_circle</span>
+                          <p className="font-label-caps text-label-caps uppercase tracking-wider mb-3 drop-shadow">{reelName || 'Instagram Reel'}</p>
+                          {reelUrl && (
+                            <a
+                              href={reelUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="bg-white/20 backdrop-blur-sm text-white px-4 py-2 text-xs uppercase tracking-widest rounded-full border border-white/30 hover:bg-white/30 transition-colors"
+                            >
+                              Watch Reel
+                            </a>
+                          )}
+                          {!reelUrl && !reelsLoading && (
+                            <span className="text-xs text-white/70">Admin will add the reel link soon.</span>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
+
+          {/* dots */}
+          <div className="carousel-dots">
+            {Array.from({ length: reelMaxSlide + 1 }).map((_, i) => (
+              <button
+                key={i}
+                className={`carousel-dot${i === reelSlide ? ' carousel-dot--active' : ''}`}
+                onClick={() => setReelSlide(i)}
+                aria-label={`Go to slide ${i + 1}`}
+              />
+            ))}
           </div>
         </div>
       </section>

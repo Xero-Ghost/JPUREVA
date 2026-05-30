@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { API_BASE } from '../config';
 
@@ -7,6 +7,7 @@ export default function VerifyEmail() {
   const [status, setStatus] = useState('pending');
   const [message, setMessage] = useState('Verifying your email...');
   const token = searchParams.get('token');
+  const hasFetched = useRef(false);
 
   useEffect(() => {
     if (!token) {
@@ -14,6 +15,9 @@ export default function VerifyEmail() {
       setMessage('Verification token is missing.');
       return;
     }
+    
+    if (hasFetched.current) return;
+    hasFetched.current = true;
 
     const verify = async () => {
       try {
