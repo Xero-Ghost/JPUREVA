@@ -182,12 +182,13 @@ def send_email(subject, html_body, recipient):
     result = [False]
     
     def _do_send():
-        try:
-            msg = Message(subject, recipients=[recipient], html=html_body)
-            mail.send(msg)
-            result[0] = True
-        except Exception as ex:
-            print('[ERROR] send_email failed:', ex)
+        with app.app_context():
+            try:
+                msg = Message(subject, recipients=[recipient], html=html_body)
+                mail.send(msg)
+                result[0] = True
+            except Exception as ex:
+                print('[ERROR] send_email failed:', ex)
 
     t = threading.Thread(target=_do_send)
     t.start()
