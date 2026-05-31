@@ -77,12 +77,13 @@ def handle_preflight():
 
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-this-secret')
 app.config['MAIL_SERVER'] = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = os.getenv('EMAIL_PORT', '587')
+app.config['MAIL_PORT'] = int(os.getenv('EMAIL_PORT', '587'))
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER', 'jpureva@gmail.com')
-app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
+app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER', '')
+app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASSWORD', '')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('EMAIL_USER', '')
+app.config['MAIL_TIMEOUT'] = 5
 app.config['FRONTEND_URL'] = os.getenv('FRONTEND_URL')
 app.config['BACKEND_URL'] = os.getenv('BACKEND_URL')
 
@@ -173,17 +174,27 @@ def create_notification(message, notification_type='info', recipient_role='admin
     db.session.commit()
 
 def send_email(subject, html_body, recipient):
-    if not app.config['MAIL_PASSWORD']:
-        print('[WARN] MAIL_PASSWORD is not set; cannot send email')
+    if not app.config.get('MAIL_PASSWORD'):
+        print('[WARN] MAIL_PASSWORD is not set; skipping email')
         return False
 
-    try:
-        msg = Message(subject, recipients=[recipient], html=html_body)
-        mail.send(msg)
-        return True
-    except Exception as ex:
-        print('[ERROR] send_email failed:', ex)
-        return False
+    import threading
+    result = [False]
+    
+    def _do_send():
+        try:
+            msg = Message(subject, recipients=[recipient], html=html_body)
+            mail.send(msg)
+            result[0] = True
+        except Exception as ex:
+            print('[ERROR] send_email failed:', ex)
+
+    t = threading.Thread(target=_do_send)
+    t.start()
+    t.join(timeout=8)  # wait max 8 seconds, then give up
+    if t.is_alive():
+        print('[WARN] Email sending timed out after 8s — skipping')
+    return result[0]
 
 # Check Database Connection
 with app.app_context():
@@ -429,43 +440,63 @@ def register():
     if confirm is not None and password != confirm:
         return jsonify({'status': 'error', 'message': 'Passwords do not match'}), 400
 
-    user = User.query.filter_by(email=email).first()
-    verification_token = uuid4().hex
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user and existing_user.email_verified:
+        return jsonify({'status': 'error', 'message': 'Email already registered. Please log in.'}), 400
 
-    if user:
-        if user.email_verified:
-            return jsonify({'status': 'error', 'message': 'Email already registered'}), 400
-        else:
-            # Overwrite unverified account so the email isn't permanently locked
-            user.username = username
-            user.password_hash = generate_password_hash(password)
-            user.role = role
-            user.email_verification_token = verification_token
-            user.email_verification_sent_at = datetime.utcnow()
-            db.session.commit()
+    verification_token = uuid4().hex
+    frontend_url = app.config.get('FRONTEND_URL') or 'https://jpureva-gray.vercel.app'
+    verification_url = f"{frontend_url.rstrip('/')}/verify-email?token={verification_token}"
+    print(f"\n[DEBUG] Verification Link for {email}: {verification_url}\n")
+
+    # Try sending email FIRST — only save user if email goes through
+    sent = send_email(
+        'Verify your JPureva account',
+        f"""<div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#3d5a00">Welcome to JPureva!</h2>
+        <p>Hi {username},</p>
+        <p>Click below to verify your email and activate your account:</p>
+        <a href="{verification_url}" style="display:inline-block;background:#3d5a00;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:16px 0">Verify Email</a>
+        <p style="color:#888;font-size:13px">This link expires in 24 hours. If you did not register, ignore this email.</p>
+        </div>""",
+        email
+    )
+
+    if not sent:
+        return jsonify({
+            'status': 'error',
+            'message': 'Could not send verification email. Please check your email address and try again later.'
+        }), 500
+
+    # Email sent — now save user to DB
+    if existing_user and not existing_user.email_verified:
+        # Overwrite the old unverified entry
+        existing_user.username = username
+        existing_user.password_hash = generate_password_hash(password)
+        existing_user.role = role
+        existing_user.email_verification_token = verification_token
+        existing_user.email_verification_sent_at = datetime.utcnow()
+        db.session.commit()
+        user = existing_user
     else:
-        user = User(username=username, password_hash=generate_password_hash(password), role=role, email=email, email_verified=False, email_verification_token=verification_token, email_verification_sent_at=datetime.utcnow())
+        user = User(
+            username=username,
+            password_hash=generate_password_hash(password),
+            role=role,
+            email=email,
+            email_verified=False,
+            email_verification_token=verification_token,
+            email_verification_sent_at=datetime.utcnow()
+        )
         db.session.add(user)
         db.session.commit()
 
-    frontend_url = app.config['FRONTEND_URL'] or request.host_url.rstrip('/')
-    verification_url = f"{frontend_url.rstrip('/')}/verify-email?token={verification_token}"
-    print(f"\n[DEBUG] Verification Link for {email}: {verification_url}\n")
-    
-    sent = False
-    try:
-        sent = send_email(
-            'Verify your FoodTrust account',
-            f"<p>Hi {username},</p><p>Click this link to verify your email:</p><p><a href=\"{verification_url}\">Verify email</a></p>",
-            email
-        )
-    except Exception as e:
-        print('send_email error:', e)
-
-    if not sent:
-        return jsonify({'status': 'success', 'message': 'User registered. Verification email could not be sent (SMTP timeout). Check your backend terminal for the verification link.', 'user_id': user.id}), 201
-
-    return jsonify({'status': 'success', 'message': 'User registered. A verification email has been sent from jpureva@gmail.com.', 'user_id': user.id, 'role': user.role}), 201
+    return jsonify({
+        'status': 'success',
+        'message': f'Account created! A verification email has been sent to {email}. Please verify to log in.',
+        'user_id': user.id,
+        'role': user.role
+    }), 201
 
 @app.route('/api/login', methods=['POST'])
 def login():
