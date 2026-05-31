@@ -97,8 +97,6 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
-mail = Mail(app)
-
 db.init_app(app)
 with app.app_context():
     db.create_all()
