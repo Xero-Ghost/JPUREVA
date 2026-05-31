@@ -76,7 +76,6 @@ def handle_preflight():
 
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-this-secret')
 app.config['FRONTEND_URL'] = os.getenv('FRONTEND_URL')
-app.config['BACKEND_URL'] = os.getenv('BACKEND_URL')
 
 # PostgreSQL Configuration
 DB_USER = os.getenv("DB_USER")
