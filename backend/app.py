@@ -1,5 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS
+from flask import Flask, jsonify, request, send_from_directory, make_response
 from flask_mail import Mail, Message
 from models import db, Restaurant, Review, Audit, Rating, ConnectionRequest, User, Lab, HomeConfig, OnboardingRequest, Notification, Testimonial, TrustStoryBlock, ensure_admin_exists
 from dotenv import load_dotenv
@@ -43,13 +42,10 @@ app = Flask(__name__)
 def _is_allowed_origin(origin):
     if not origin:
         return False
-    # Allow any localhost for local dev
     if 'localhost' in origin or '127.0.0.1' in origin:
         return True
-    # Allow any vercel.app subdomain (handles preview + production)
     if origin.endswith('.vercel.app'):
         return True
-    # Allow explicitly set FRONTEND_URL env var
     frontend_url = os.getenv('FRONTEND_URL', '')
     for allowed in frontend_url.split(','):
         normalized = _normalize_origin(allowed)
@@ -57,12 +53,28 @@ def _is_allowed_origin(origin):
             return True
     return False
 
-CORS(app,
-     origins=_is_allowed_origin,
-     supports_credentials=True,
-     allow_headers=["Content-Type", "Authorization"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-)
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get('Origin', '')
+    if _is_allowed_origin(origin):
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    return response
+
+@app.before_request
+def handle_preflight():
+    if request.method == 'OPTIONS':
+        origin = request.headers.get('Origin', '')
+        response = make_response('', 200)
+        if _is_allowed_origin(origin):
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        return response
+
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-this-secret')
 app.config['MAIL_SERVER'] = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 app.config['MAIL_PORT'] = os.getenv('EMAIL_PORT', '587')
