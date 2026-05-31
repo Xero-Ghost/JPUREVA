@@ -1,5 +1,4 @@
 from flask import Flask, jsonify, request, send_from_directory, make_response
-from flask_mail import Mail, Message
 from models import db, Restaurant, Review, Audit, Rating, ConnectionRequest, User, Lab, HomeConfig, OnboardingRequest, Notification, Testimonial, TrustStoryBlock, ensure_admin_exists
 from dotenv import load_dotenv
 import os
@@ -76,14 +75,6 @@ def handle_preflight():
         return response
 
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-this-secret')
-app.config['MAIL_SERVER'] = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.getenv('EMAIL_PORT', '587'))
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER', '')
-app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASSWORD', '')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('EMAIL_USER', '')
-app.config['MAIL_TIMEOUT'] = 5
 app.config['FRONTEND_URL'] = os.getenv('FRONTEND_URL')
 app.config['BACKEND_URL'] = os.getenv('BACKEND_URL')
 
@@ -174,28 +165,41 @@ def create_notification(message, notification_type='info', recipient_role='admin
     db.session.commit()
 
 def send_email(subject, html_body, recipient):
-    if not app.config.get('MAIL_PASSWORD'):
-        print('[WARN] MAIL_PASSWORD is not set; skipping email')
+    resend_api_key = os.getenv('RESEND_API_KEY')
+    email_from = 'onboarding@resend.dev'
+
+    if not resend_api_key:
+        print('[WARN] RESEND_API_KEY not set — skipping email')
         return False
 
-    import threading
-    result = [False]
-    
-    def _do_send():
-        with app.app_context():
-            try:
-                msg = Message(subject, recipients=[recipient], html=html_body)
-                mail.send(msg)
-                result[0] = True
-            except Exception as ex:
-                print('[ERROR] send_email failed:', ex)
+    import urllib.request as _req
+    import json as _json
 
-    t = threading.Thread(target=_do_send)
-    t.start()
-    t.join(timeout=8)  # wait max 8 seconds, then give up
-    if t.is_alive():
-        print('[WARN] Email sending timed out after 8s — skipping')
-    return result[0]
+    payload = _json.dumps({
+        'from': f'JPureva <{email_from}>',
+        'to': [recipient],
+        'subject': subject,
+        'html': html_body
+    }).encode('utf-8')
+
+    request = _req.Request(
+        'https://api.resend.com/emails',
+        data=payload,
+        headers={
+            'Authorization': f'Bearer {resend_api_key}',
+            'Content-Type': 'application/json'
+        },
+        method='POST'
+    )
+    try:
+        with _req.urlopen(request, timeout=10) as resp:
+            result = _json.loads(resp.read())
+            print(f'[OK] Email sent via Resend: {result}')
+            return True
+    except Exception as ex:
+        print(f'[ERROR] Resend email failed: {ex}')
+        return False
+
 
 # Check Database Connection
 with app.app_context():
@@ -452,14 +456,23 @@ def register():
 
     # Try sending email FIRST — only save user if email goes through
     sent = send_email(
-        'Verify your JPureva account',
-        f"""<div style="font-family:sans-serif;max-width:480px;margin:auto">
-        <h2 style="color:#3d5a00">Welcome to JPureva!</h2>
-        <p>Hi {username},</p>
-        <p>Click below to verify your email and activate your account:</p>
-        <a href="{verification_url}" style="display:inline-block;background:#3d5a00;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:16px 0">Verify Email</a>
-        <p style="color:#888;font-size:13px">This link expires in 24 hours. If you did not register, ignore this email.</p>
-        </div>""",
+        'Confirmation Email from JPureva — Please Verify Your Account',
+        f"""<div style="font-family:sans-serif;max-width:520px;margin:auto;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">
+        <div style="background:#3d5a00;padding:24px 32px">
+          <h1 style="color:#fff;margin:0;font-size:22px">JPureva</h1>
+          <p style="color:#c8e6a0;margin:4px 0 0">Trusted Food Certification Platform</p>
+        </div>
+        <div style="padding:32px">
+          <h2 style="color:#3d5a00;margin-top:0">Welcome, {username}!</h2>
+          <p style="color:#333">Thank you for signing up. Please click the button below to verify your email address and activate your account:</p>
+          <div style="text-align:center;margin:28px 0">
+            <a href="{verification_url}" style="display:inline-block;background:#3d5a00;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">Verify My Email</a>
+          </div>
+          <p style="color:#555;font-size:14px">This link will expire in 24 hours. If you did not create this account, you can safely ignore this email.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+          <p style="color:#999;font-size:12px">📢 <strong>Note:</strong> JPureva is currently in its testing phase. Verification emails are temporarily sent via <em>onboarding@resend.dev</em> instead of our official address. This is completely safe and will be updated once we go fully live.</p>
+        </div>
+      </div>""",
         email
     )
 
@@ -575,28 +588,43 @@ def password_reset_request():
         return jsonify({'status': 'error', 'message': 'Email is required'}), 400
     user = User.query.filter_by(email=email).first()
     if not user:
-        return jsonify({'status': 'success', 'message': 'If this email exists, a reset link has been sent.'}), 200
+        # Don't reveal whether email exists or not
+        return jsonify({'status': 'success', 'message': 'If this email is registered, a password reset link has been sent.'}), 200
+
     token = uuid4().hex
     user.password_reset_token = token
     user.password_reset_sent_at = datetime.utcnow()
     db.session.commit()
 
-    frontend_url = app.config['FRONTEND_URL'] or request.host_url.rstrip('/')
+    frontend_url = app.config.get('FRONTEND_URL') or 'https://jpureva-gray.vercel.app'
     reset_url = f"{frontend_url.rstrip('/')}/reset-password?token={token}"
-    sent = False
-    try:
-        sent = send_email(
-            'Reset your FoodTrust password',
-            f"<p>Hi {user.username},</p><p>Use this link to reset your password:</p><p><a href=\"{reset_url}\">Reset password</a></p>",
-            email
-        )
-    except Exception as e:
-        print('send_email error:', e)
+
+    sent = send_email(
+        'Password Reset Request — JPureva',
+        f"""<div style="font-family:sans-serif;max-width:520px;margin:auto;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">
+        <div style="background:#3d5a00;padding:24px 32px">
+          <h1 style="color:#fff;margin:0;font-size:22px">JPureva</h1>
+          <p style="color:#c8e6a0;margin:4px 0 0">Trusted Food Certification Platform</p>
+        </div>
+        <div style="padding:32px">
+          <h2 style="color:#3d5a00;margin-top:0">Reset Your Password</h2>
+          <p style="color:#333">Hi {user.username},</p>
+          <p style="color:#333">We received a request to reset your password. Click the button below to set a new password:</p>
+          <div style="text-align:center;margin:28px 0">
+            <a href="{reset_url}" style="display:inline-block;background:#3d5a00;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">Reset My Password</a>
+          </div>
+          <p style="color:#555;font-size:14px">This link will expire in <strong>30 minutes</strong>. If you did not request a password reset, you can safely ignore this email.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+          <p style="color:#999;font-size:12px">📢 <strong>Note:</strong> JPureva is currently in its testing phase. Emails are temporarily sent via <em>onboarding@resend.dev</em> instead of our official address. This is completely safe.</p>
+        </div>
+      </div>""",
+        email
+    )
 
     if not sent:
-        return jsonify({'status': 'success', 'message': 'If this email exists, a reset link could not be sent because email SMTP is not configured. Please set EMAIL_PASSWORD or SMTP_PASS to enable email delivery.'}), 200
+        return jsonify({'status': 'error', 'message': 'Could not send reset email. Please try again later.'}), 500
 
-    return jsonify({'status': 'success', 'message': 'If this email exists, a reset link has been sent from jpureva@gmail.com.'}), 200
+    return jsonify({'status': 'success', 'message': 'Password reset link has been sent to your email.'}), 200
 
 
 @app.route('/api/password-reset', methods=['POST'])
