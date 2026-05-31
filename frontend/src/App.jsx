@@ -8,7 +8,6 @@ import PartnerPortal from './pages/PartnerPortal';
 import TrustStories from './pages/TrustStories';
 import Login from './pages/Login';
 import VerifyEmail from './pages/VerifyEmail';
-import ResetPassword from './pages/ResetPassword';
 import AdminDashboard from './pages/AdminDashboard';
 import PartnerDashboard from './pages/PartnerDashboard';
 import ConsumerDashboard from './pages/ConsumerDashboard';
@@ -32,7 +31,6 @@ function App() {
               <Route path="/trust-stories" element={<TrustStories />} />
               <Route path="/login" element={<Login />} />
               <Route path="/verify-email" element={<VerifyEmail />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/google-auth-success" element={<GoogleAuthSuccess />} />
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/partner/dashboard" element={<PartnerDashboard />} />

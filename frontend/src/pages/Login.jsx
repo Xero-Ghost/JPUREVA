@@ -30,6 +30,9 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [forgotPassword, setForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const [resetUsername, setResetUsername] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirm, setResetConfirm] = useState('');
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
 
@@ -68,7 +71,7 @@ export default function Login() {
 
       if (response.ok) {
         if (isRegistering) {
-          setInfoMessage('Registered successfully! Please check your email to verify your account before logging in.');
+          setInfoMessage('Registered successfully! You can now log in.');
           setIsRegistering(false);
         } else {
           login(data.user, data.token);
@@ -89,17 +92,36 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setInfoMessage('');
-    if (!resetEmail) return setError('Please enter your email');
+    if (!resetEmail || !resetUsername || !resetPassword || !resetConfirm) {
+      return setError('Please fill in all fields');
+    }
+    if (resetPassword !== resetConfirm) return setError('Passwords do not match');
+    
+    const pwdError = validatePassword(resetPassword);
+    if (pwdError) return setError(pwdError);
+
     try {
-      const res = await fetch(`${API_BASE}/password-reset-request`, {
+      const res = await fetch(`${API_BASE}/direct-password-reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetEmail })
+        body: JSON.stringify({ 
+          email: resetEmail, 
+          username: resetUsername, 
+          newPassword: resetPassword, 
+          confirmPassword: resetConfirm 
+        })
       });
       const d = await res.json();
-      setInfoMessage(d.message || 'If this email exists, a reset link has been sent.');
-      setForgotPassword(false);
-      setResetEmail('');
+      if (res.ok) {
+        setInfoMessage(d.message || 'Password updated successfully.');
+        setForgotPassword(false);
+        setResetEmail('');
+        setResetUsername('');
+        setResetPassword('');
+        setResetConfirm('');
+      } else {
+        setError(d.message || 'Failed to reset password');
+      }
     } catch (err) {
       console.error(err);
       setError('Network error while requesting password reset');
@@ -132,7 +154,7 @@ export default function Login() {
             </div>
             <div className="rounded-3xl bg-surface border border-surface-variant/70 p-5">
               <p className="text-label-caps text-label-caps uppercase tracking-[0.2em] text-olive mb-2">Verified & Safe</p>
-              <p className="text-body-sm text-on-surface-variant">Email verification and strong password protection keep your account safe.</p>
+              <p className="text-body-sm text-on-surface-variant">Strong password protection keeps your account safe.</p>
             </div>
           </div>
         </div>
@@ -178,6 +200,16 @@ export default function Login() {
           {forgotPassword ? (
             <form onSubmit={handlePasswordResetRequest} className="flex flex-col gap-5">
               <div>
+                <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Username</label>
+                <input
+                  type="text"
+                  required
+                  value={resetUsername}
+                  onChange={(e) => setResetUsername(e.target.value)}
+                  className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-3xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
+                />
+              </div>
+              <div>
                 <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Email</label>
                 <input
                   type="email"
@@ -187,8 +219,28 @@ export default function Login() {
                   className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-3xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
                 />
               </div>
+              <div>
+                <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">New Password</label>
+                <input
+                  type="password"
+                  required
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
+                  className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-3xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
+                />
+              </div>
+              <div>
+                <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Confirm New Password</label>
+                <input
+                  type="password"
+                  required
+                  value={resetConfirm}
+                  onChange={(e) => setResetConfirm(e.target.value)}
+                  className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-3xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
+                />
+              </div>
               <button type="submit" className="w-full bg-deep-olive text-paper-white font-body-md font-semibold py-4 rounded-3xl shadow-[0_15px_40px_rgba(56,74,47,0.14)] hover:bg-primary transition-colors">
-                Send reset link
+                Set New Password
               </button>
               <div className="mt-4 text-center">
                 <button type="button" onClick={() => setForgotPassword(false)} className="text-primary font-semibold">Back to login</button>

@@ -161,43 +161,6 @@ def create_notification(message, notification_type='info', recipient_role='admin
     db.session.add(notice)
     db.session.commit()
 
-def send_email(subject, html_body, recipient):
-    resend_api_key = os.getenv('RESEND_API_KEY')
-    email_from = 'onboarding@resend.dev'
-
-    if not resend_api_key:
-        print('[WARN] RESEND_API_KEY not set — skipping email')
-        return False
-
-    import urllib.request as _req
-    import json as _json
-
-    payload = _json.dumps({
-        'from': f'JPureva <{email_from}>',
-        'to': [recipient],
-        'subject': subject,
-        'html': html_body
-    }).encode('utf-8')
-
-    request = _req.Request(
-        'https://api.resend.com/emails',
-        data=payload,
-        headers={
-            'Authorization': f'Bearer {resend_api_key}',
-            'Content-Type': 'application/json'
-        },
-        method='POST'
-    )
-    try:
-        with _req.urlopen(request, timeout=10) as resp:
-            result = _json.loads(resp.read())
-            print(f'[OK] Email sent via Resend: {result}')
-            return True
-    except Exception as ex:
-        print(f'[ERROR] Resend email failed: {ex}')
-        return False
-
-
 # Check Database Connection
 with app.app_context():
     try:
@@ -443,68 +406,24 @@ def register():
         return jsonify({'status': 'error', 'message': 'Passwords do not match'}), 400
 
     existing_user = User.query.filter_by(email=email).first()
-    if existing_user and existing_user.email_verified:
+    if existing_user:
         return jsonify({'status': 'error', 'message': 'Email already registered. Please log in.'}), 400
 
-    verification_token = uuid4().hex
-    frontend_url = app.config.get('FRONTEND_URL') or 'https://jpureva-gray.vercel.app'
-    verification_url = f"{frontend_url.rstrip('/')}/verify-email?token={verification_token}"
-    print(f"\n[DEBUG] Verification Link for {email}: {verification_url}\n")
-
-    # Try sending email FIRST — only save user if email goes through
-    sent = send_email(
-        'Confirmation Email from JPureva — Please Verify Your Account',
-        f"""<div style="font-family:sans-serif;max-width:520px;margin:auto;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">
-        <div style="background:#3d5a00;padding:24px 32px">
-          <h1 style="color:#fff;margin:0;font-size:22px">JPureva</h1>
-          <p style="color:#c8e6a0;margin:4px 0 0">Trusted Food Certification Platform</p>
-        </div>
-        <div style="padding:32px">
-          <h2 style="color:#3d5a00;margin-top:0">Welcome, {username}!</h2>
-          <p style="color:#333">Thank you for signing up. Please click the button below to verify your email address and activate your account:</p>
-          <div style="text-align:center;margin:28px 0">
-            <a href="{verification_url}" style="display:inline-block;background:#3d5a00;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">Verify My Email</a>
-          </div>
-          <p style="color:#555;font-size:14px">This link will expire in 24 hours. If you did not create this account, you can safely ignore this email.</p>
-          <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
-          <p style="color:#999;font-size:12px">📢 <strong>Note:</strong> JPureva is currently in its testing phase. Verification emails are temporarily sent via <em>onboarding@resend.dev</em> instead of our official address. This is completely safe and will be updated once we go fully live.</p>
-        </div>
-      </div>""",
-        email
+    user = User(
+        username=username,
+        password_hash=generate_password_hash(password),
+        role=role,
+        email=email,
+        email_verified=True,  # Auto-verified
+        email_verification_token=None,
+        email_verification_sent_at=None
     )
-
-    if not sent:
-        return jsonify({
-            'status': 'error',
-            'message': 'Could not send verification email. Please check your email address and try again later.'
-        }), 500
-
-    # Email sent — now save user to DB
-    if existing_user and not existing_user.email_verified:
-        # Overwrite the old unverified entry
-        existing_user.username = username
-        existing_user.password_hash = generate_password_hash(password)
-        existing_user.role = role
-        existing_user.email_verification_token = verification_token
-        existing_user.email_verification_sent_at = datetime.utcnow()
-        db.session.commit()
-        user = existing_user
-    else:
-        user = User(
-            username=username,
-            password_hash=generate_password_hash(password),
-            role=role,
-            email=email,
-            email_verified=False,
-            email_verification_token=verification_token,
-            email_verification_sent_at=datetime.utcnow()
-        )
-        db.session.add(user)
-        db.session.commit()
+    db.session.add(user)
+    db.session.commit()
 
     return jsonify({
         'status': 'success',
-        'message': f'Account created! A verification email has been sent to {email}. Please verify to log in.',
+        'message': 'Account created successfully! You can now log in.',
         'user_id': user.id,
         'role': user.role
     }), 201
@@ -517,8 +436,7 @@ def login():
     
     user = User.query.filter_by(email=email).first()
     if user and check_password_hash(user.password_hash, password):
-        if not user.email_verified:
-            return jsonify({'status': 'error', 'message': 'Please verify your email before logging in.'}), 403
+        # Email verification check removed
         return jsonify({
             'status': 'success', 
             'token': f'fake-jwt-token-{user.id}', # Mock token
@@ -577,71 +495,31 @@ def update_user_settings():
     }), 200
 
 
-@app.route('/api/password-reset-request', methods=['POST'])
-def password_reset_request():
+@app.route('/api/direct-password-reset', methods=['POST'])
+def direct_password_reset():
     data = request.json
     email = data.get('email')
-    if not email:
-        return jsonify({'status': 'error', 'message': 'Email is required'}), 400
-    user = User.query.filter_by(email=email).first()
-    if not user:
-        # Don't reveal whether email exists or not
-        return jsonify({'status': 'success', 'message': 'If this email is registered, a password reset link has been sent.'}), 200
-
-    token = uuid4().hex
-    user.password_reset_token = token
-    user.password_reset_sent_at = datetime.utcnow()
-    db.session.commit()
-
-    frontend_url = app.config.get('FRONTEND_URL') or 'https://jpureva-gray.vercel.app'
-    reset_url = f"{frontend_url.rstrip('/')}/reset-password?token={token}"
-
-    sent = send_email(
-        'Password Reset Request — JPureva',
-        f"""<div style="font-family:sans-serif;max-width:520px;margin:auto;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">
-        <div style="background:#3d5a00;padding:24px 32px">
-          <h1 style="color:#fff;margin:0;font-size:22px">JPureva</h1>
-          <p style="color:#c8e6a0;margin:4px 0 0">Trusted Food Certification Platform</p>
-        </div>
-        <div style="padding:32px">
-          <h2 style="color:#3d5a00;margin-top:0">Reset Your Password</h2>
-          <p style="color:#333">Hi {user.username},</p>
-          <p style="color:#333">We received a request to reset your password. Click the button below to set a new password:</p>
-          <div style="text-align:center;margin:28px 0">
-            <a href="{reset_url}" style="display:inline-block;background:#3d5a00;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">Reset My Password</a>
-          </div>
-          <p style="color:#555;font-size:14px">This link will expire in <strong>30 minutes</strong>. If you did not request a password reset, you can safely ignore this email.</p>
-          <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
-          <p style="color:#999;font-size:12px">📢 <strong>Note:</strong> JPureva is currently in its testing phase. Emails are temporarily sent via <em>onboarding@resend.dev</em> instead of our official address. This is completely safe.</p>
-        </div>
-      </div>""",
-        email
-    )
-
-    if not sent:
-        return jsonify({'status': 'error', 'message': 'Could not send reset email. Please try again later.'}), 500
-
-    return jsonify({'status': 'success', 'message': 'Password reset link has been sent to your email.'}), 200
-
-
-@app.route('/api/password-reset', methods=['POST'])
-def password_reset():
-    data = request.json
-    token = data.get('token')
+    username = data.get('username')
     new_password = data.get('newPassword')
-    if not token or not new_password:
-        return jsonify({'status': 'error', 'message': 'Token and new password are required'}), 400
-    if len(new_password) < 6:
-        return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters'}), 400
-    user = User.query.filter_by(password_reset_token=token).first()
+    confirm_password = data.get('confirmPassword')
+
+    if not email or not username or not new_password or not confirm_password:
+        return jsonify({'status': 'error', 'message': 'All fields are required.'}), 400
+
+    if new_password != confirm_password:
+        return jsonify({'status': 'error', 'message': 'Passwords do not match.'}), 400
+
+    if len(new_password) < 8:
+        return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters.'}), 400
+
+    user = User.query.filter_by(email=email, username=username).first()
     if not user:
-        return jsonify({'status': 'error', 'message': 'Invalid or expired password reset token'}), 404
-    if not user.password_reset_sent_at or datetime.utcnow() - user.password_reset_sent_at > timedelta(minutes=30):
-        return jsonify({'status': 'error', 'message': 'Password reset token has expired'}), 400
+        # Don't reveal exact failure reason for security
+        return jsonify({'status': 'error', 'message': 'Invalid username or email combination.'}), 400
+
     user.password_hash = generate_password_hash(new_password)
-    user.password_reset_token = None
-    user.password_reset_sent_at = None
     db.session.commit()
+
     return jsonify({'status': 'success', 'message': 'Password updated successfully. You can now log in.'}), 200
 
 # --- Partner Endpoints ---
