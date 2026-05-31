@@ -39,14 +39,26 @@ def _parse_origins(value):
     return origins
 
 app = Flask(__name__)
-frontend_env_origins = _parse_origins(os.getenv("FRONTEND_URL"))
-allowed_origins = frontend_env_origins or [
-    "https://jpureva.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-]
-CORS(app, 
-     origins=allowed_origins,
+
+def _is_allowed_origin(origin):
+    if not origin:
+        return False
+    # Allow any localhost for local dev
+    if 'localhost' in origin or '127.0.0.1' in origin:
+        return True
+    # Allow any vercel.app subdomain (handles preview + production)
+    if origin.endswith('.vercel.app'):
+        return True
+    # Allow explicitly set FRONTEND_URL env var
+    frontend_url = os.getenv('FRONTEND_URL', '')
+    for allowed in frontend_url.split(','):
+        normalized = _normalize_origin(allowed)
+        if normalized and origin.rstrip('/') == normalized:
+            return True
+    return False
+
+CORS(app,
+     origins=_is_allowed_origin,
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
@@ -59,8 +71,8 @@ app.config['MAIL_USE_SSL'] = False
 app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER', 'jpureva@gmail.com')
 app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
-app.config['FRONTEND_URL'] = os.getenv('FRONTEND_URL', '')
-app.config['BACKEND_URL'] = os.getenv('BACKEND_URL', '')
+app.config['FRONTEND_URL'] = os.getenv('FRONTEND_URL')
+app.config['BACKEND_URL'] = os.getenv('BACKEND_URL')
 
 # PostgreSQL Configuration
 DB_USER = os.getenv("DB_USER")
