@@ -225,7 +225,7 @@ def get_restaurants():
         })
     return jsonify({'status': 'success', 'data': results})
 
-@app.route('/api/restaurants/<int:restaurant_id>', methods=['GET'])
+@app.route('/api/restaurants/<string:restaurant_id>', methods=['GET'])
 def get_restaurant(restaurant_id):
     """Fetch a specific restaurant by ID."""
     r = Restaurant.objects(id=restaurant_id).first()
@@ -907,10 +907,10 @@ def update_home_config():
 @app.route('/api/testimonials', methods=['GET'])
 def get_testimonials():
     featured_only = request.args.get('featured', 'false').lower() == 'true'
-    query = Testimonial.query
     if featured_only:
-        query = query.filter_by(is_featured=True)
-    testimonials = query.order_by(Testimonial.created_at.desc()).all()
+        testimonials = Testimonial.objects(is_featured=True).order_by('-created_at')
+    else:
+        testimonials = Testimonial.objects().order_by('-created_at')
     return jsonify([{
         'id': t.id,
         'name': t.name,
@@ -936,7 +936,7 @@ def create_testimonial():
     
     return jsonify({'id': t.id, 'message': 'Testimonial created'}), 201
 
-@app.route('/api/admin/testimonials/<int:tid>', methods=['PUT'])
+@app.route('/api/admin/testimonials/<string:tid>', methods=['PUT'])
 @require_admin
 def update_testimonial(tid):
     t = Testimonial.objects(id=tid).first()
@@ -949,7 +949,7 @@ def update_testimonial(tid):
     
     return jsonify({'message': 'Testimonial updated'})
 
-@app.route('/api/admin/testimonials/<int:tid>', methods=['DELETE'])
+@app.route('/api/admin/testimonials/<string:tid>', methods=['DELETE'])
 @require_admin
 def delete_testimonial(tid):
     t = Testimonial.objects(id=tid).first()
@@ -961,7 +961,7 @@ def delete_testimonial(tid):
 
 @app.route('/api/trust-stories', methods=['GET'])
 def get_trust_stories():
-    blocks = TrustStoryBlock.query.order_by(TrustStoryBlock.position).all()
+    blocks = TrustStoryBlock.objects().order_by('position')
     result = []
     for b in blocks:
         block_data = {
@@ -1002,7 +1002,7 @@ def create_trust_story_block():
     
     return jsonify({'id': block.id, 'message': 'Block created'}), 201
 
-@app.route('/api/admin/trust-stories/<int:bid>', methods=['PUT'])
+@app.route('/api/admin/trust-stories/<string:bid>', methods=['PUT'])
 @require_admin
 def update_trust_story_block(bid):
     block = TrustStoryBlock.objects(id=bid).first()
@@ -1016,7 +1016,7 @@ def update_trust_story_block(bid):
     
     return jsonify({'message': 'Block updated'})
 
-@app.route('/api/admin/trust-stories/<int:bid>', methods=['DELETE'])
+@app.route('/api/admin/trust-stories/<string:bid>', methods=['DELETE'])
 @require_admin
 def delete_trust_story_block(bid):
     block = TrustStoryBlock.objects(id=bid).first()
