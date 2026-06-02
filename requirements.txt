@@ -1,0 +1,6 @@
+Flask
+mongoengine
+pymongo
+gunicorn
+python-dotenv
+PyJWT
