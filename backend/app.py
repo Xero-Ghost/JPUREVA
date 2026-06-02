@@ -781,7 +781,7 @@ def complete_audit():
 @app.route('/api/admin/notifications', methods=['GET'])
 def get_notifications():
     role = request.args.get('role', 'admin')
-    notifications = list(Notification.objects(recipient_role=role).order_by(Notification.created_at.desc()).limit(20))
+    notifications = list(Notification.objects(recipient_role=role).order_by('-created_at').limit(20))
     return jsonify({'status': 'success', 'data': [
         {
             'id': n.id,
