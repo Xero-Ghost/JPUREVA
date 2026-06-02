@@ -101,8 +101,8 @@ DB_NAME = os.getenv("DB_NAME")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/Jindal")
 mongoengine.connect(host=MONGO_URI)
 
+app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', '/tmp/uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
 # --- Auth Middleware ---
 def _get_user_from_token(token_str):
     """Resolve a user from either a fake-jwt or real PyJWT token."""
@@ -170,7 +170,18 @@ try:
 except Exception as e:
     print("[ERROR] Database connection failed!")
     print(e)
-ensure_admin_exists()
+
+_admin_setup_done = False
+
+@app.before_request
+def setup_admin_once():
+    global _admin_setup_done
+    if not _admin_setup_done:
+        try:
+            ensure_admin_exists()
+        except Exception as e:
+            print("[ERROR] Could not ensure admin:", e)
+        _admin_setup_done = True
 
 @app.route('/api/restaurants', methods=['GET'])
 def get_restaurants():
