@@ -15,6 +15,7 @@ import PartnerProfile from './pages/PartnerProfile';
 import Settings from './pages/Settings';
 import { AuthProvider } from './context/AuthContext';
 import GoogleAuthSuccess from './pages/GoogleAuthSuccess';
+import ErrorPage from './pages/ErrorPage';
 
 function App() {
   return (
@@ -37,6 +38,7 @@ function App() {
               <Route path="/consumer/dashboard" element={<ConsumerDashboard />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/:partnerSlug" element={<PartnerProfile />} />
+              <Route path="/error" element={<ErrorPage />} />
             </Routes>
           </main>
           <Footer />

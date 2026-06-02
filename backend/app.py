@@ -1,9 +1,9 @@
 from flask import Flask, jsonify, request, send_from_directory, make_response
-from models import db, Restaurant, Review, Audit, Rating, ConnectionRequest, User, Lab, HomeConfig, OnboardingRequest, Notification, Testimonial, TrustStoryBlock, ensure_admin_exists
+from models import Restaurant, Review, Audit, Rating, ConnectionRequest, User, Lab, HomeConfig, OnboardingRequest, Notification, Testimonial, TrustStoryBlock, ensure_admin_exists
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
-from sqlalchemy import text
+import mongoengine
 import json
 import re
 from uuid import uuid4
@@ -36,8 +36,22 @@ def _parse_origins(value):
             origins.append(normalized)
     return origins
 
+from bson import ObjectId
+from flask.json.provider import DefaultJSONProvider
+
 app = Flask(__name__)
 
+class MongoJsonProvider(DefaultJSONProvider):
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        if hasattr(obj, 'id') and isinstance(obj.id, ObjectId):
+            return str(obj.id)
+        if hasattr(obj, 'to_mongo'):
+            return obj.to_mongo().to_dict()
+        return super().default(obj)
+
+app.json = MongoJsonProvider(app)
 def _is_allowed_origin(origin):
     if not origin:
         return False
@@ -84,21 +98,9 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    "DATABASE_URL", 
-    f"postgresql://{DB_USER or 'postgres'}:{DB_PASSWORD or 'deepesh123'}@{DB_HOST or 'localhost'}:{DB_PORT or '5432'}/{DB_NAME or 'Jindal'}"
-)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    "pool_pre_ping": True,
-    "pool_recycle": 300,
-}
-app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/Jindal")
+mongoengine.connect(host=MONGO_URI)
 
-db.init_app(app)
-with app.app_context():
-    db.create_all()
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- Auth Middleware ---
@@ -110,14 +112,14 @@ def _get_user_from_token(token_str):
     if token_str.startswith('fake-jwt-token-'):
         try:
             user_id = int(token_str.replace('fake-jwt-token-', ''))
-            return User.query.get(user_id)
+            return User.objects(id=user_id).first()
         except Exception:
             pass
     # Check real PyJWT
     try:
         import jwt as pyjwt
         payload = pyjwt.decode(token_str, app.config['SECRET_KEY'], algorithms=['HS256'])
-        return User.query.get(payload.get('user_id'))
+        return User.objects(id=payload.get('user_id')).first()
     except Exception:
         pass
     return None
@@ -158,41 +160,22 @@ def create_notification(message, notification_type='info', recipient_role='admin
         message=message,
         notification_type=notification_type
     )
-    db.session.add(notice)
-    db.session.commit()
+    notice.save()
+    
 
 # Check Database Connection
-with app.app_context():
-    try:
-        db.session.execute(text("SELECT 1"))
-        db.create_all()
-        print("[OK] PostgreSQL connected successfully!")
-    except Exception as e:
-        print("[ERROR] Database connection failed!")
-        print(e)
-    # Ensure new columns added to users table after model updates
-    try:
-        with db.engine.connect() as conn:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(120) UNIQUE"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(120)"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TIMESTAMP"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url VARCHAR(500)"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(120)"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_sent_at TIMESTAMP"))
-            # Drop username unique constraint
-            conn.execute(text("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_username_key"))
-            conn.commit()
-            print('[OK] Ensured user columns exist and username constraint dropped')
-    except Exception as ex:
-        print('[WARN] Could not ensure schema changes:', ex)
-    # Ensure the hardcoded admin user exists
-    ensure_admin_exists()
+try:
+    mongoengine.connect(host=MONGO_URI)
+    print("[OK] MongoDB connected successfully!")
+except Exception as e:
+    print("[ERROR] Database connection failed!")
+    print(e)
+ensure_admin_exists()
 
 @app.route('/api/restaurants', methods=['GET'])
 def get_restaurants():
     """Fetch all certified restaurants with their ratings."""
-    restaurants = Restaurant.query.all()
+    restaurants = list(Restaurant.objects())
     results = []
     for r in restaurants:
         latest_audit = None
@@ -234,7 +217,7 @@ def get_restaurants():
 @app.route('/api/restaurants/<int:restaurant_id>', methods=['GET'])
 def get_restaurant(restaurant_id):
     """Fetch a specific restaurant by ID."""
-    r = Restaurant.query.get_or_404(restaurant_id)
+    r = Restaurant.objects(id=restaurant_id).first()
     latest_audit = None
     if r.audits:
         latest_audit = max(r.audits, key=lambda a: a.audit_date)
@@ -288,7 +271,7 @@ def get_restaurant(restaurant_id):
 
 @app.route('/api/shops/slug/<string:slug>', methods=['GET'])
 def get_restaurant_by_slug(slug):
-    restaurant = Restaurant.query.filter_by(slug=slug).first_or_404()
+    restaurant = Restaurant.objects(slug=slug).first()
     latest_audit = None
     if restaurant.audits:
         latest_audit = max(restaurant.audits, key=lambda a: a.audit_date)
@@ -352,8 +335,8 @@ def onboard_partner():
         contact=contact,
         status='Pending'
     )
-    db.session.add(request_entry)
-    db.session.commit()
+    request_entry.save()
+    
 
     create_notification(
         f"New onboarding request received for {name}.",
@@ -379,8 +362,8 @@ def connect_form():
         email=email,
         message=message
     )
-    db.session.add(new_request)
-    db.session.commit()
+    new_request.save()
+    
     
     return jsonify({'status': 'success', 'message': 'Form submitted successfully'}), 201
 
@@ -405,7 +388,7 @@ def register():
     if confirm is not None and password != confirm:
         return jsonify({'status': 'error', 'message': 'Passwords do not match'}), 400
 
-    existing_user = User.query.filter_by(email=email).first()
+    existing_user = User.objects(email=email).first()
     if existing_user:
         return jsonify({'status': 'error', 'message': 'Email already registered. Please log in.'}), 400
 
@@ -418,8 +401,8 @@ def register():
         email_verification_token=None,
         email_verification_sent_at=None
     )
-    db.session.add(user)
-    db.session.commit()
+    user.save()
+    
 
     return jsonify({
         'status': 'success',
@@ -434,7 +417,7 @@ def login():
     email = data.get('email')
     password = data.get('password')
     
-    user = User.query.filter_by(email=email).first()
+    user = User.objects(email=email).first()
     if user and check_password_hash(user.password_hash, password):
         # Email verification check removed
         return jsonify({
@@ -447,7 +430,7 @@ def login():
 
 @app.route('/api/verify-email/<string:token>', methods=['GET'])
 def verify_email(token):
-    user = User.query.filter_by(email_verification_token=token).first()
+    user = User.objects(email_verification_token=token).first()
     if not user:
         return jsonify({'status': 'error', 'message': 'Invalid or already used verification link'}), 404
     
@@ -458,7 +441,7 @@ def verify_email(token):
 
     user.email_verified = True
     user.email_verification_token = None
-    db.session.commit()
+    
     return jsonify({'status': 'success', 'message': 'Email verified successfully. You can now log in.'}), 200
 
 @app.route('/api/user/settings', methods=['PUT'])
@@ -481,7 +464,7 @@ def update_user_settings():
     if 'profile_image_url' in data:
         user.profile_image_url = data['profile_image_url']
         
-    db.session.commit()
+    
     return jsonify({
         'status': 'success', 
         'message': 'Settings updated successfully',
@@ -512,13 +495,13 @@ def direct_password_reset():
     if len(new_password) < 8:
         return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters.'}), 400
 
-    user = User.query.filter_by(email=email, username=username).first()
+    user = User.objects(email=email, username=username).first()
     if not user:
         # Don't reveal exact failure reason for security
         return jsonify({'status': 'error', 'message': 'Invalid username or email combination.'}), 400
 
     user.password_hash = generate_password_hash(new_password)
-    db.session.commit()
+    
 
     return jsonify({'status': 'success', 'message': 'Password updated successfully. You can now log in.'}), 200
 
@@ -527,7 +510,7 @@ def direct_password_reset():
 @app.route('/api/partner/dashboard', methods=['GET'])
 def partner_dashboard():
     user_id = request.args.get('user_id')
-    restaurants = Restaurant.query.filter_by(owner_id=user_id).all()
+    restaurants = list(Restaurant.objects(owner_id=user_id))
     if not restaurants:
         return jsonify({'status': 'error', 'message': 'No restaurant found for this partner'}), 404
 
@@ -548,7 +531,7 @@ def partner_dashboard():
 @app.route('/api/partner/shops', methods=['GET'])
 def partner_shops():
     user_id = request.args.get('user_id')
-    restaurants = Restaurant.query.filter_by(owner_id=user_id).all()
+    restaurants = list(Restaurant.objects(owner_id=user_id))
     return jsonify({'status': 'success', 'data': [
         {
             'id': r.id,
@@ -586,12 +569,12 @@ def partner_shops():
 def partner_update():
     data = request.json
     user_id = data.get('user_id')
-    restaurant = Restaurant.query.filter_by(owner_id=user_id).first()
+    restaurant = Restaurant.objects(owner_id=user_id).first()
     
     if restaurant:
         restaurant.name = data.get('name', restaurant.name)
         restaurant.reels = data.get('reels', restaurant.reels)
-        db.session.commit()
+        
         return jsonify({'status': 'success', 'message': 'Restaurant updated'}), 200
     return jsonify({'status': 'error', 'message': 'Restaurant not found'}), 404
 
@@ -604,9 +587,9 @@ def partner_request_audit():
 
     restaurant = None
     if restaurant_id:
-        restaurant = Restaurant.query.get(restaurant_id)
+        restaurant = Restaurant.objects(id=restaurant_id).first()
     elif user_id:
-        restaurant = Restaurant.query.filter_by(owner_id=user_id).first()
+        restaurant = Restaurant.objects(owner_id=user_id).first()
 
     if not restaurant:
         return jsonify({'status': 'error', 'message': 'Restaurant not found'}), 404
@@ -615,8 +598,8 @@ def partner_request_audit():
         return jsonify({'status': 'error', 'message': 'Your onboarding is not approved yet.'}), 400
 
     audit = Audit(restaurant_id=restaurant.id, audit_type=audit_type, result='Pending', status='Pending Approval')
-    db.session.add(audit)
-    db.session.commit()
+    audit.save()
+    
 
     return jsonify({
         'status': 'success',
@@ -635,23 +618,23 @@ def partner_request_audit():
 def add_lab():
     data = request.json
     lab = Lab(name=data.get('name'), address=data.get('address'), email=data.get('email'), phone=data.get('phone'))
-    db.session.add(lab)
-    db.session.commit()
+    lab.save()
+    
     return jsonify({'status': 'success', 'message': 'Lab added'}), 201
 
 @app.route('/api/admin/labs', methods=['GET'])
 def get_labs():
-    labs = Lab.query.all()
+    labs = list(Lab.objects())
     return jsonify({'status': 'success', 'data': [{'id': l.id, 'name': l.name, 'address': l.address, 'email': l.email, 'phone': l.phone} for l in labs]}), 200
 
 @app.route('/api/admin/overview', methods=['GET'])
 def admin_overview():
-    onboarding_count = OnboardingRequest.query.filter_by(status='Pending').count()
-    audit_request_count = Audit.query.filter(Audit.status.in_(['Pending Approval', 'Audit Pending'])).count()
-    shops_count = Restaurant.query.count()
+    onboarding_count = OnboardingRequest.objects(status='Pending').count()
+    audit_request_count = Audit.objects(status__in=['Pending Approval', 'Audit Pending']).count()
+    shops_count = Restaurant.objects().count()
 
-    onboarding_requests = OnboardingRequest.query.filter_by(status='Pending').all()
-    audit_requests = Audit.query.filter(Audit.status.in_(['Pending Approval', 'Audit Pending'])).all()
+    onboarding_requests = list(OnboardingRequest.objects(status='Pending'))
+    audit_requests = list(Audit.objects(status__in=['Pending Approval', 'Audit Pending']))
 
     return jsonify({
         'status': 'success',
@@ -688,7 +671,7 @@ def admin_overview():
 def approve_onboarding():
     data = request.json
     request_id = data.get('request_id')
-    request_entry = OnboardingRequest.query.get(request_id)
+    request_entry = OnboardingRequest.objects(id=request_id).first()
 
     if not request_entry or request_entry.status != 'Pending':
         return jsonify({'status': 'error', 'message': 'Onboarding request not found'}), 404
@@ -701,8 +684,8 @@ def approve_onboarding():
         slug=make_slug(request_entry.name, request_entry.user_id)
     )
     request_entry.status = 'Approved'
-    db.session.add(restaurant)
-    db.session.commit()
+    restaurant.save()
+    
 
     create_notification(
         f"Onboarding approved for {restaurant.name}.",
@@ -718,13 +701,13 @@ def reject_onboarding():
     data = request.json
     request_id = data.get('request_id')
     reason = data.get('reason')
-    request_entry = OnboardingRequest.query.get(request_id)
+    request_entry = OnboardingRequest.objects(id=request_id).first()
 
     if not request_entry or request_entry.status != 'Pending':
         return jsonify({'status': 'error', 'message': 'Onboarding request not found'}), 404
 
     request_entry.status = 'Rejected'
-    db.session.commit()
+    
 
     reason_text = f" Reason: {reason}" if reason else ''
     create_notification(
@@ -740,13 +723,13 @@ def reject_onboarding():
 def approve_audit_request():
     data = request.json
     audit_id = data.get('audit_id')
-    audit = Audit.query.get(audit_id)
+    audit = Audit.objects(id=audit_id).first()
 
     if not audit:
         return jsonify({'status': 'error', 'message': 'Audit request not found'}), 404
 
     audit.status = 'Audit Pending'
-    db.session.commit()
+    
 
     return jsonify({'status': 'success', 'message': 'Audit request approved'}), 200
 
@@ -755,7 +738,7 @@ def approve_audit_request():
 def complete_audit():
     data = request.json
     audit_id = data.get('audit_id')
-    audit = Audit.query.get(audit_id)
+    audit = Audit.objects(id=audit_id).first()
 
     if not audit:
         return jsonify({'status': 'error', 'message': 'Audit request not found'}), 404
@@ -774,7 +757,7 @@ def complete_audit():
     else:
         audit.restaurant.certification_status = 'Suspended'
 
-    db.session.commit()
+    
 
     create_notification(
         f"Audit completed for {audit.restaurant.name}. Result: {audit.result}.",
@@ -787,7 +770,7 @@ def complete_audit():
 @app.route('/api/admin/notifications', methods=['GET'])
 def get_notifications():
     role = request.args.get('role', 'admin')
-    notifications = Notification.query.filter_by(recipient_role=role).order_by(Notification.created_at.desc()).limit(20).all()
+    notifications = list(Notification.objects(recipient_role=role).order_by(Notification.created_at.desc()).limit(20))
     return jsonify({'status': 'success', 'data': [
         {
             'id': n.id,
@@ -828,7 +811,7 @@ def partner_update_shop():
     restaurant_id = data.get('restaurant_id')
     user_id = data.get('user_id')
 
-    restaurant = Restaurant.query.filter_by(id=restaurant_id, owner_id=user_id).first()
+    restaurant = Restaurant.objects(id=restaurant_id, owner_id=user_id).first()
     if not restaurant:
         return jsonify({'status': 'error', 'message': 'Restaurant not found'}), 404
 
@@ -846,7 +829,7 @@ def partner_update_shop():
     restaurant.videos = json.dumps(data.get('videos', safe_json_list(restaurant.videos)))
     restaurant.reels = json.dumps(data.get('reels', safe_json_list(restaurant.reels)))
 
-    db.session.commit()
+    
     return jsonify({'status': 'success', 'message': 'Restaurant updated'}), 200
 
 @app.route('/api/admin/shop/update', methods=['POST'])
@@ -854,7 +837,7 @@ def partner_update_shop():
 def admin_update_shop():
     data = request.json
     restaurant_id = data.get('restaurant_id')
-    restaurant = Restaurant.query.get(restaurant_id)
+    restaurant = Restaurant.objects(id=restaurant_id).first()
     if not restaurant:
         return jsonify({'status': 'error', 'message': 'Restaurant not found'}), 404
 
@@ -872,19 +855,19 @@ def admin_update_shop():
     restaurant.videos = json.dumps(data.get('videos', safe_json_list(restaurant.videos)))
     restaurant.reels = json.dumps(data.get('reels', safe_json_list(restaurant.reels)))
 
-    db.session.commit()
+    
     return jsonify({'status': 'success', 'message': 'Restaurant updated'}), 200
 
 @app.route('/api/home-config', methods=['GET'])
 def get_home_config():
     key = request.args.get('key')
     if key:
-        config = HomeConfig.query.filter_by(key=key).first()
+        config = HomeConfig.objects(key=key).first()
         if not config:
             return jsonify({'status': 'success', 'data': None}), 200
         return jsonify({'status': 'success', 'data': json.loads(config.value)}), 200
 
-    configs = HomeConfig.query.all()
+    configs = list(HomeConfig.objects())
     payload = {c.key: json.loads(c.value) for c in configs}
     return jsonify({'status': 'success', 'data': payload}), 200
 
@@ -898,13 +881,13 @@ def update_home_config():
     if not key:
         return jsonify({'status': 'error', 'message': 'Missing config key'}), 400
 
-    config = HomeConfig.query.filter_by(key=key).first()
+    config = HomeConfig.objects(key=key).first()
     if not config:
         config = HomeConfig(key=key, value=json.dumps(value or []))
-        db.session.add(config)
+        config.save()
     else:
         config.value = json.dumps(value or [])
-    db.session.commit()
+    
 
     return jsonify({'status': 'success', 'message': 'Home config updated'}), 200
 
@@ -938,29 +921,29 @@ def create_testimonial():
         avatar_url=data.get('avatar_url', ''),
         is_featured=data.get('is_featured', False)
     )
-    db.session.add(t)
-    db.session.commit()
+    t.save()
+    
     return jsonify({'id': t.id, 'message': 'Testimonial created'}), 201
 
 @app.route('/api/admin/testimonials/<int:tid>', methods=['PUT'])
 @require_admin
 def update_testimonial(tid):
-    t = Testimonial.query.get_or_404(tid)
+    t = Testimonial.objects(id=tid).first()
     data = request.json
     t.name = data.get('name', t.name)
     t.role = data.get('role', t.role)
     t.content = data.get('content', t.content)
     t.avatar_url = data.get('avatar_url', t.avatar_url)
     t.is_featured = data.get('is_featured', t.is_featured)
-    db.session.commit()
+    
     return jsonify({'message': 'Testimonial updated'})
 
 @app.route('/api/admin/testimonials/<int:tid>', methods=['DELETE'])
 @require_admin
 def delete_testimonial(tid):
-    t = Testimonial.query.get_or_404(tid)
-    db.session.delete(t)
-    db.session.commit()
+    t = Testimonial.objects(id=tid).first()
+    t.delete()
+    
     return jsonify({'message': 'Testimonial deleted'})
 
 # --- Trust Story Block Endpoints ---
@@ -982,7 +965,7 @@ def get_trust_stories():
             config = json.loads(b.config) if b.config else {}
             tid = config.get('testimonial_id')
             if tid:
-                t = Testimonial.query.get(tid)
+                t = Testimonial.objects(id=tid).first()
                 if t:
                     block_data['testimonial'] = {
                         'id': t.id,
@@ -998,20 +981,20 @@ def get_trust_stories():
 @require_admin
 def create_trust_story_block():
     data = request.json
-    max_pos = db.session.query(db.func.max(TrustStoryBlock.position)).scalar() or 0
+    max_pos = TrustStoryBlock.objects().order_by('-position').first().position if TrustStoryBlock.objects().count() > 0 else 0
     block = TrustStoryBlock(
         block_type=data.get('block_type', 'text'),
         position=data.get('position', max_pos + 1),
         config=json.dumps(data.get('config', {}))
     )
-    db.session.add(block)
-    db.session.commit()
+    block.save()
+    
     return jsonify({'id': block.id, 'message': 'Block created'}), 201
 
 @app.route('/api/admin/trust-stories/<int:bid>', methods=['PUT'])
 @require_admin
 def update_trust_story_block(bid):
-    block = TrustStoryBlock.query.get_or_404(bid)
+    block = TrustStoryBlock.objects(id=bid).first()
     data = request.json
     if 'block_type' in data:
         block.block_type = data['block_type']
@@ -1019,15 +1002,15 @@ def update_trust_story_block(bid):
         block.position = data['position']
     if 'config' in data:
         block.config = json.dumps(data['config'])
-    db.session.commit()
+    
     return jsonify({'message': 'Block updated'})
 
 @app.route('/api/admin/trust-stories/<int:bid>', methods=['DELETE'])
 @require_admin
 def delete_trust_story_block(bid):
-    block = TrustStoryBlock.query.get_or_404(bid)
-    db.session.delete(block)
-    db.session.commit()
+    block = TrustStoryBlock.objects(id=bid).first()
+    block.delete()
+    
     return jsonify({'message': 'Block deleted'})
 
 @app.route('/api/admin/trust-stories/reorder', methods=['POST'])
@@ -1037,10 +1020,10 @@ def reorder_trust_story_blocks():
     if not isinstance(data, list):
         return jsonify({'error': 'Expected array of {id, position}'}), 400
     for item in data:
-        block = TrustStoryBlock.query.get(item.get('id'))
+        block = TrustStoryBlock.objects(id=item.get('id')).first()
         if block:
             block.position = item.get('position', block.position)
-    db.session.commit()
+    
     return jsonify({'message': 'Blocks reordered'})
 
 # --- Consumer Endpoints ---
@@ -1051,7 +1034,7 @@ def post_review():
     restaurant_id = data.get('restaurant_id')
     if not restaurant_id:
         return jsonify({'status': 'error', 'message': 'restaurant_id is required'}), 400
-    restaurant = Restaurant.query.get(restaurant_id)
+    restaurant = Restaurant.objects(id=restaurant_id).first()
     if not restaurant:
         return jsonify({'status': 'error', 'message': 'Restaurant not found'}), 404
     review = Review(
@@ -1060,8 +1043,8 @@ def post_review():
         reviewer_name=data.get('reviewer_name', 'Anonymous'),
         content=data.get('content')
     )
-    db.session.add(review)
-    db.session.commit()
+    review.save()
+    
     return jsonify({'status': 'success', 'message': 'Review posted'}), 201
 
 @app.route('/api/consumer/safety-report', methods=['POST'])
@@ -1154,12 +1137,12 @@ def google_callback():
     if not google_email:
         return jsonify({'status': 'error', 'message': 'Could not get email from Google'}), 400
 
-    user = User.query.filter_by(email=google_email).first()
+    user = User.objects(email=google_email).first()
     if not user:
         username = google_name.replace(' ', '_').lower()
         base_username = username
         counter = 1
-        while User.query.filter_by(username=username).first():
+        while User.objects(username=username).first():
             username = f"{base_username}{counter}"
             counter += 1
         user = User(
@@ -1170,8 +1153,8 @@ def google_callback():
             email_verified=True,
             email_verification_token=None
         )
-        db.session.add(user)
-        db.session.commit()
+        user.save()
+        
 
     import jwt as pyjwt
     token = pyjwt.encode(

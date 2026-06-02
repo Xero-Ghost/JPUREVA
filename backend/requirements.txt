@@ -1,6 +1,6 @@
 Flask
-Flask-SQLAlchemy
-psycopg2-binary
+mongoengine
+pymongo
 gunicorn
 python-dotenv
 PyJWT

@@ -1,11 +1,19 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    setProfileMenuOpen(false);
+    setMobileMenuOpen(false);
+    navigate('/');
+  };
 
   return (
     <nav className="bg-surface shadow-sm docked full-width sticky top-0 z-50">
@@ -76,7 +84,7 @@ export default function Navbar() {
                       <span className="material-symbols-outlined text-xl">settings</span>
                       Settings
                     </Link>
-                    <button onClick={() => { logout(); setProfileMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2 hover:bg-surface-container-high text-on-surface transition-colors text-left">
+                    <button onClick={handleLogout} className="w-full flex items-center gap-2 px-4 py-2 hover:bg-surface-container-high text-on-surface transition-colors text-left">
                       <span className="material-symbols-outlined text-xl">logout</span>
                       Logout
                     </button>
@@ -149,7 +157,7 @@ export default function Navbar() {
                 Settings
               </Link>
               <button
-                onClick={() => { logout(); setMobileMenuOpen(false); }}
+                onClick={handleLogout}
                 className="w-full flex items-center gap-3 text-left text-on-surface-variant font-body-md text-body-md font-semibold hover:bg-surface-container-high px-4 py-3 rounded-xl transition-colors duration-200">
                 <span className="material-symbols-outlined">logout</span>
                 Logout ({user.username})
