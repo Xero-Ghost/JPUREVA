@@ -190,3 +190,7 @@
 .reel-preview-card:hover {
   transform: scale(1.02);
 }
+
+.bg-primary{
+  background-color: #636b2f;
+}
