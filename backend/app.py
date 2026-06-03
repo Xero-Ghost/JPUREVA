@@ -112,7 +112,7 @@ def _get_user_from_token(token_str):
     # Check fake token format: fake-jwt-token-<user_id>
     if token_str.startswith('fake-jwt-token-'):
         try:
-            user_id = int(token_str.replace('fake-jwt-token-', ''))
+            user_id = token_str.replace('fake-jwt-token-', '')
             return User.objects(id=user_id).first()
         except Exception:
             pass
@@ -121,7 +121,8 @@ def _get_user_from_token(token_str):
         import jwt as pyjwt
         payload = pyjwt.decode(token_str, app.config['SECRET_KEY'], algorithms=['HS256'])
         return User.objects(id=payload.get('user_id')).first()
-    except Exception:
+    except Exception as e:
+        print("[DEBUG JWT ERROR]", e)
         pass
     return None
 
@@ -130,7 +131,7 @@ def require_admin(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get('Authorization', '')
-        token_str = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else ''
+        token_str = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else auth_header
         user = _get_user_from_token(token_str)
         if not user or user.role != 'admin':
             return jsonify({'error': 'Admin access required'}), 403
