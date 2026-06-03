@@ -935,6 +935,7 @@ def update_home_config():
         config.save()
     else:
         config.value = json.dumps(value or [])
+        config.save()
     
 
     return jsonify({'status': 'success', 'message': 'Home config updated'}), 200

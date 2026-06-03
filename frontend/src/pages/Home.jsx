@@ -146,7 +146,7 @@ export default function Home() {
       if (!testimonialHovered.current) {
         setTestimonialSlide(s => (s >= testimonialMaxSlide ? 0 : s + 1));
       }
-    }, 5000);
+    }, 3500);
     return () => clearInterval(id);
   }, [testimonialMaxSlide]);
 
@@ -156,7 +156,7 @@ export default function Home() {
       if (!reelHovered.current) {
         setReelSlide(s => (s >= reelMaxSlide ? 0 : s + 1));
       }
-    }, 5000);
+    }, 3500);
     return () => clearInterval(id);
   }, [reelMaxSlide]);
 
@@ -434,7 +434,7 @@ export default function Home() {
                     {reelId && (
                       <div className="reel-embed-container h-[480px] rounded-xl overflow-hidden border border-surface-variant">
                         <iframe
-                          src={`https://www.instagram.com/reel/${reelId}/embed/`}
+                          src={`https://www.instagram.com/reel/${reelId}/embed/?hidecaption=true`}
                           title={reelName || 'Instagram Reel'}
                           className="w-full h-full border-0"
                           allowFullScreen
@@ -449,6 +449,10 @@ export default function Home() {
                         <video
                           src={reelUrl}
                           controls
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
                           className="w-full h-full object-cover"
                           preload="metadata"
                         />
