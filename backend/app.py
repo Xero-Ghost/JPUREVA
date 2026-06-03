@@ -1180,7 +1180,8 @@ def google_callback():
     )
 
     frontend_url = app.config['FRONTEND_URL'] or 'http://localhost:5173'
-    return flask_redirect(f"{frontend_url}/google-auth-success?token={token}&role={user.role}&username={user.username}&id={user.id}")
+    import urllib.parse
+    return flask_redirect(f"{frontend_url}/google-auth-success?token={token}&role={user.role}&username={urllib.parse.quote(user.username)}&id={user.id}&email={urllib.parse.quote(user.email or '')}")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
