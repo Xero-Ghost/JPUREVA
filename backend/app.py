@@ -1169,7 +1169,7 @@ def google_callback():
 
     import jwt as pyjwt
     token = pyjwt.encode(
-        {'user_id': user.id, 'exp': datetime.utcnow() + timedelta(days=7)},
+        {'user_id': str(user.id), 'exp': datetime.utcnow() + timedelta(days=7)},
         app.config['SECRET_KEY'],
         algorithm='HS256'
     )
