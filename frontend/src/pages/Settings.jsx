@@ -9,16 +9,17 @@ export default function Settings() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [profileImage, setProfileImage] = useState('');
+  const [role, setRole] = useState('consumer');
   
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
     if (user) {
       setUsername(user.username || '');
       setEmail(user.email || '');
       setProfileImage(user.profile_image_url || '');
+      setRole(user.role || 'consumer');
     }
   }, [user]);
 
@@ -29,7 +30,7 @@ export default function Settings() {
     setIsSubmitting(true);
 
     const token = localStorage.getItem('token');
-    const payload = { username, email, profile_image_url: profileImage };
+    const payload = { username, email, profile_image_url: profileImage, role };
     if (password.trim() !== '') {
       if (password.length < 8) {
         setError('Password must be at least 8 characters long.');
@@ -144,6 +145,21 @@ export default function Settings() {
                 className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
               />
             </div>
+
+            {user.role !== 'admin' && (
+              <div>
+                <label className="block font-label-caps text-label-caps text-on-surface-variant uppercase mb-2">Account Role</label>
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  className="w-full bg-surface-container-lowest border border-outline-variant text-on-background font-body-md p-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition appearance-none"
+                >
+                  <option value="consumer">Customer</option>
+                  <option value="partner">Partner</option>
+                </select>
+                <p className="text-sm text-on-surface/50 mt-2">Switch your account role to access specific dashboard features.</p>
+              </div>
+            )}
 
             <div className="mt-4">
               <button

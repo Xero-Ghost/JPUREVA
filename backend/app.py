@@ -475,6 +475,11 @@ def update_user_settings():
     if 'profile_image_url' in data:
         user.profile_image_url = data['profile_image_url']
         
+    if 'role' in data and data['role'] in ['consumer', 'partner']:
+        if user.role != 'admin':
+            user.role = data['role']
+            
+    user.save()
     
     return jsonify({
         'status': 'success', 
