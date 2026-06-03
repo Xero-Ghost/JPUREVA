@@ -1,7 +1,11 @@
 import { useRef, useState } from 'react';
 import { API_BASE } from '../config';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function PartnerPortal() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const roiRef = useRef(null);
   const auditRef = useRef(null);
   const [monthlyRevenue, setMonthlyRevenue] = useState('');
@@ -26,33 +30,20 @@ export default function PartnerPortal() {
 
   const handleAuditSubmit = async (e) => {
     e.preventDefault();
-    setIsSubmittingAudit(true);
-    try {
-      const res = await fetch(`${API_BASE}/onboard`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: auditName,
-          category: auditCategory,
-          contact: auditContact
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert('Baseline audit request submitted. Our team will reach out shortly.');
-        setAuditName('');
-        setAuditCategory('');
-        setAuditContact('');
-      } else {
-        alert(data.message || 'Failed to submit audit request.');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Network error.');
-    } finally {
-      setIsSubmittingAudit(false);
+    if (!user) {
+      alert('Please login as a partner to request an audit.');
+      navigate('/login');
+      return;
     }
+    if (user.role !== 'partner') {
+      alert('Only partners can request audits. Please login with a partner account.');
+      navigate('/login');
+      return;
+    }
+    // Since they are a partner, direct them to their dashboard to use the full creation form
+    navigate('/partner-dashboard');
   };
+
 
   return (
     <div className="w-full relative bg-editorial-cream">
@@ -233,7 +224,7 @@ export default function PartnerPortal() {
                 className="bg-charcoal-black text-paper-white px-6 py-3 rounded-lg uppercase tracking-widest font-label-caps text-sm hover:bg-surface-tint transition-colors"
                 disabled={isSubmittingAudit}
               >
-                {isSubmittingAudit ? 'Submitting...' : 'Request Baseline Audit'}
+                {!user ? 'Login to Request Audit' : 'Go to Dashboard to Onboard'}
               </button>
             </div>
           </form>

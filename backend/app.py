@@ -187,7 +187,7 @@ def setup_admin_once():
 @app.route('/api/restaurants', methods=['GET'])
 def get_restaurants():
     """Fetch all certified restaurants with their ratings."""
-    restaurants = list(Restaurant.objects())
+    restaurants = list(Restaurant.objects(certification_status__in=['Verified', 'Approved']))
     results = []
     for r in restaurants:
         latest_audit = None
