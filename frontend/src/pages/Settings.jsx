@@ -15,6 +15,7 @@ export default function Settings() {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
     if (user) {
       setUsername(user.username || '');
       setEmail(user.email || '');
