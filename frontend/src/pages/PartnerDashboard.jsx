@@ -11,6 +11,11 @@ export default function PartnerDashboard() {
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [requestingAudit, setRequestingAudit] = useState(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    name: '', category: 'Restaurant', address: '', owner_name: '', owner_phone: '', working_hours: ''
+  });
 
   const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 
@@ -31,6 +36,35 @@ export default function PartnerDashboard() {
       })
       .catch(() => setLoading(false));
   };
+
+  const handleCreateShop = async (e) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      const payload = { ...createForm, user_id: user.id };
+      const res = await fetch(`${API_BASE}/partner/shop/create`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        alert('Establishment created successfully!');
+        setShowCreateForm(false);
+        setCreateForm({ name: '', category: 'Restaurant', address: '', owner_name: '', owner_phone: '', working_hours: '' });
+        setLoading(true);
+        loadShops();
+      } else {
+        const data = await res.json();
+        alert(data.message || 'Failed to create establishment.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
 
   const handleExpand = (shop) => {
     if (expandedShop === shop.id) {
@@ -120,13 +154,66 @@ export default function PartnerDashboard() {
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-stack-lg">
       {/* Header */}
-      <div className="mb-8 border-b border-surface-variant pb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <span className="material-symbols-outlined text-primary text-3xl" style={{ fontVariationSettings: "'FILL' 1" }}>dashboard</span>
-          <h1 className="font-display-lg text-display-lg text-charcoal-black">Partner Dashboard</h1>
+      <div className="mb-8 border-b border-surface-variant pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <span className="material-symbols-outlined text-primary text-3xl" style={{ fontVariationSettings: "'FILL' 1" }}>dashboard</span>
+            <h1 className="font-display-lg text-display-lg text-charcoal-black">Partner Dashboard</h1>
+          </div>
+          <p className="font-body-md text-body-md text-muted-stone">Welcome back, <strong>{user.username}</strong>. Manage your establishments and track audit progress.</p>
         </div>
-        <p className="font-body-md text-body-md text-muted-stone">Welcome back, <strong>{user.username}</strong>. Manage your establishments and track audit progress.</p>
+        <button
+          onClick={() => setShowCreateForm(true)}
+          className="bg-primary text-on-primary px-5 py-2.5 rounded-lg font-label-caps text-sm uppercase tracking-wider hover:bg-primary/90 transition-colors flex items-center gap-2"
+        >
+          <span className="material-symbols-outlined text-lg">add_business</span>
+          Add New Establishment
+        </button>
       </div>
+
+      {showCreateForm && (
+        <div className="bg-surface border border-outline-variant rounded-2xl p-6 mb-8 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-headline-lg text-xl text-charcoal-black">Create New Establishment</h2>
+            <button onClick={() => setShowCreateForm(false)} className="text-on-surface/50 hover:text-on-surface">
+              <span className="material-symbols-outlined">close</span>
+            </button>
+          </div>
+          <form onSubmit={handleCreateShop} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-label-caps uppercase text-muted-stone mb-1 text-xs">Establishment Name *</label>
+              <input required type="text" value={createForm.name} onChange={e => setCreateForm(prev => ({ ...prev, name: e.target.value }))} className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none" />
+            </div>
+            <div>
+              <label className="block text-label-caps uppercase text-muted-stone mb-1 text-xs">Category</label>
+              <select value={createForm.category} onChange={e => setCreateForm(prev => ({ ...prev, category: e.target.value }))} className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                <option value="Restaurant">Restaurant</option>
+                <option value="Cafe">Cafe</option>
+                <option value="Hotel">Hotel</option>
+                <option value="Cloud Kitchen">Cloud Kitchen</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-label-caps uppercase text-muted-stone mb-1 text-xs">Full Address</label>
+              <input type="text" value={createForm.address} onChange={e => setCreateForm(prev => ({ ...prev, address: e.target.value }))} className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none" />
+            </div>
+            <div>
+              <label className="block text-label-caps uppercase text-muted-stone mb-1 text-xs">Owner Name</label>
+              <input type="text" value={createForm.owner_name} onChange={e => setCreateForm(prev => ({ ...prev, owner_name: e.target.value }))} className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none" />
+            </div>
+            <div>
+              <label className="block text-label-caps uppercase text-muted-stone mb-1 text-xs">Owner Phone</label>
+              <input type="tel" value={createForm.owner_phone} onChange={e => setCreateForm(prev => ({ ...prev, owner_phone: e.target.value }))} className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none" />
+            </div>
+            <div className="md:col-span-2 mt-4 flex justify-end gap-3">
+              <button type="button" onClick={() => setShowCreateForm(false)} className="px-5 py-2.5 rounded-lg font-label-caps text-sm uppercase text-on-surface/60 hover:bg-surface-container-high transition-colors">Cancel</button>
+              <button type="submit" disabled={creating} className="bg-primary text-on-primary px-5 py-2.5 rounded-lg font-label-caps text-sm uppercase tracking-wider hover:bg-primary/90 transition-colors disabled:opacity-50">
+                {creating ? 'Creating...' : 'Create Establishment'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter">
@@ -138,15 +225,15 @@ export default function PartnerDashboard() {
           <span className="material-symbols-outlined text-6xl text-on-surface/20 mb-4 block">store</span>
           <h3 className="font-headline-lg text-xl text-on-surface/50 mb-2">No Establishments Yet</h3>
           <p className="text-on-surface/40 mb-6 max-w-md mx-auto">
-            You haven&apos;t been onboarded yet. Visit the Partner Portal to request a baseline audit.
+            You haven&apos;t added any establishments yet. Create your first establishment to get started.
           </p>
-          <Link
-            to="/partner-portal"
+          <button
+            onClick={() => setShowCreateForm(true)}
             className="inline-flex items-center gap-2 bg-deep-olive text-paper-white px-6 py-3 rounded-lg font-label-caps text-sm uppercase tracking-widest hover:bg-primary transition-colors"
           >
-            <span className="material-symbols-outlined text-lg">arrow_forward</span>
-            Go to Partner Portal
-          </Link>
+            <span className="material-symbols-outlined text-lg">add</span>
+            Add New Establishment
+          </button>
         </div>
       ) : (
         <div className="flex flex-col gap-6">

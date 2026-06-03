@@ -582,6 +582,36 @@ def partner_shops():
         } for r in restaurants
     ]}), 200
 
+@app.route('/api/partner/shop/create', methods=['POST'])
+def partner_shop_create():
+    data = request.json
+    user_id = data.get('user_id')
+    name = data.get('name')
+    if not user_id or not name:
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+    slug_base = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    slug = slug_base
+    counter = 1
+    while Restaurant.objects(slug=slug).first():
+        slug = f"{slug_base}-{counter}"
+        counter += 1
+
+    r = Restaurant(
+        name=name,
+        category=data.get('category', 'Restaurant'),
+        address=data.get('address', ''),
+        owner_name=data.get('owner_name', ''),
+        owner_phone=data.get('owner_phone', ''),
+        working_hours=data.get('working_hours', ''),
+        owner_id=user_id,
+        certification_status='Pending Audit',
+        slug=slug
+    )
+    r.save()
+    return jsonify({'status': 'success', 'message': 'Establishment created successfully!', 'id': str(r.id)}), 201
+
+
 @app.route('/api/partner/update', methods=['POST'])
 def partner_update():
     data = request.json
