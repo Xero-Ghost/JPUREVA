@@ -8,6 +8,7 @@ import json
 import re
 from uuid import uuid4
 from functools import wraps
+import urllib.parse
 from urllib.parse import urlparse
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -1180,7 +1181,6 @@ def google_callback():
     )
 
     frontend_url = app.config['FRONTEND_URL'] or 'http://localhost:5173'
-    import urllib.parse
     return flask_redirect(f"{frontend_url}/google-auth-success?token={token}&role={user.role}&username={urllib.parse.quote(user.username)}&id={user.id}&email={urllib.parse.quote(user.email or '')}")
 
 if __name__ == '__main__':
