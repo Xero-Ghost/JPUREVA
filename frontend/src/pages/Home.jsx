@@ -40,6 +40,8 @@ const FALLBACK_TESTIMONIALS = [
 /* ── breakpoint helper ───────────────────────────────────────────── */
 
 const getVisibleCards = (width) => {
+  if (width >= 1536) return 5; // 2xl
+  if (width >= 1280) return 4; // xl
   if (width >= 1024) return 3; // lg
   if (width >= 768) return 2;  // md
   return 1;                    // mobile
@@ -63,10 +65,12 @@ export default function Home() {
   const [testimonialSlide, setTestimonialSlide] = useState(0);
   const [reelSlide, setReelSlide] = useState(0);
   const [visibleCards, setVisibleCards] = useState(() => getVisibleCards(window.innerWidth));
+  const [containerWidth, setContainerWidth] = useState(0);
 
-  /* ── refs for hover-pause ───────────────────────────────────────── */
+  /* ── refs ───────────────────────────────────────── */
   const testimonialHovered = useRef(false);
   const reelHovered = useRef(false);
+  const carouselContainerRef = useRef(null);
 
   /* ── fetch reels (unchanged) ────────────────────────────────────── */
   useEffect(() => {
@@ -103,7 +107,13 @@ export default function Home() {
 
   /* ── responsive listener ────────────────────────────────────────── */
   useEffect(() => {
-    const onResize = () => setVisibleCards(getVisibleCards(window.innerWidth));
+    const onResize = () => {
+      setVisibleCards(getVisibleCards(window.innerWidth));
+      if (carouselContainerRef.current) {
+        setContainerWidth(carouselContainerRef.current.offsetWidth);
+      }
+    };
+    onResize(); // initialize
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -151,8 +161,10 @@ export default function Home() {
   }, [reelMaxSlide]);
 
   /* ── slide widths (card + gap) ──────────────────────────────────── */
-  const testimonialSlideWidth = 350 + 24; // w-[350px] + gap-6
-  const reelSlideWidth = window.innerWidth >= 768 ? 300 + 24 : 280 + 24; // w-[280px] md:w-[300px] + gap-6
+  const gap = 24; // 24px gap (gap-6)
+  const availableWidth = containerWidth || window.innerWidth; // fallback
+  const cardWidth = (availableWidth - (gap * (visibleCards - 1))) / visibleCards;
+  const slideWidth = cardWidth + gap;
 
   return (
     <>
@@ -305,6 +317,7 @@ export default function Home() {
 
         <div
           className="max-w-container-max mx-auto relative"
+          ref={carouselContainerRef}
           onMouseEnter={() => { testimonialHovered.current = true; }}
           onMouseLeave={() => { testimonialHovered.current = false; }}
         >
@@ -328,7 +341,7 @@ export default function Home() {
           <div className="overflow-hidden">
             <div
               className="flex gap-6 transition-transform duration-500 ease-in-out"
-              style={{ transform: `translateX(-${testimonialSlide * testimonialSlideWidth}px)` }}
+              style={{ transform: `translateX(-${testimonialSlide * slideWidth}px)` }}
             >
               {testimonialCards.map((t, index) => {
                 const initials = t.initials || (t.name ? t.name.split(' ').map(w => w[0]).join('') : '??');
@@ -336,7 +349,8 @@ export default function Home() {
                 return (
                   <div
                     key={(t.name || 'testimonial') + index}
-                    className="w-[350px] flex-shrink-0 bg-paper-white border border-surface-variant p-6 rounded-xl flex flex-col shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
+                    className="flex-shrink-0 bg-paper-white border border-surface-variant p-6 rounded-xl flex flex-col shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
+                    style={{ width: `${cardWidth}px` }}
                   >
                     <div className="flex items-center gap-3 mb-4">
                       <div className={`w-10 h-10 bg-${colorClass}/10 rounded-full flex items-center justify-center text-${colorClass} font-bold`}>
@@ -402,7 +416,7 @@ export default function Home() {
           <div className="overflow-hidden">
             <div
               className="flex gap-6 transition-transform duration-500 ease-in-out"
-              style={{ transform: `translateX(-${reelSlide * reelSlideWidth}px)` }}
+              style={{ transform: `translateX(-${reelSlide * slideWidth}px)` }}
             >
               {reelCards.map((item, index) => {
                 const reelName = typeof item === 'object' ? item.name : `Instagram Reel ${item}`;
@@ -413,7 +427,8 @@ export default function Home() {
                 return (
                   <div
                     key={(reelName || 'reel') + index}
-                    className="w-[280px] md:w-[300px] flex-shrink-0"
+                    className="flex-shrink-0"
+                    style={{ width: `${cardWidth}px` }}
                   >
                     {/* Instagram embed */}
                     {reelId && (
